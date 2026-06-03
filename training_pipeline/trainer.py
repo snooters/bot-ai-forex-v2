@@ -91,6 +91,10 @@ class Trainer:
         if aligned.empty:
             raise ValueError("No data after aligning timeframes")
 
+        close_col = f"close_{fast_tf}"
+        if "close" not in aligned.columns and close_col in aligned.columns:
+            aligned["close"] = aligned[close_col]
+
         aligned = self.label_engine.create_labels(aligned)
         if aligned.empty:
             raise ValueError("No data after labeling")

@@ -5,14 +5,18 @@ on:
     - cron: '0 2 * * 0'   # tiap Minggu jam 2 pagi
   workflow_dispatch:       # trigger manual dari GitHub UI
     inputs:
-      days:
+      window_days:
         description: 'Training window (days)'
         required: false
-        default: '2555'
-      force:
-        description: 'Force retrain'
-        type: boolean
-        default: false
+        default: '750'
+      step_days:
+        description: 'Step per review (days)'
+        required: false
+        default: '30'
+      num_rolls:
+        description: 'Jumlah rolling window'
+        required: false
+        default: '12'
 
 env:
   PYTHON_VERSION: '3.11'
@@ -22,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v5
         with:
@@ -36,34 +42,50 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Extract training data
+        run: |
+          mkdir -p data/historical
+          python -c "
+import zipfile, pathlib
+pathlib.Path('data/historical').mkdir(parents=True, exist_ok=True)
+with zipfile.ZipFile('forex_data_7years.zip') as z:
+    z.extractall('data/historical')
+print('Extracted', len(z.namelist()), 'files')
+"
+          echo "Data files:"
+          find data/historical -name '*.parquet' | head -10
+
       - name: Setup .env
         run: |
           cp .env.example .env
-          echo "HISTORICAL_YEARS=7" >> .env
-          echo "ROLLING_TRAINING_WINDOW_DAYS=${{ github.event.inputs.days || '2555' }}" >> .env
+          echo "LEARN_ONLY=true" >> .env
+          echo "TRADING_MODE=simulation" >> .env
+          echo "IS_DEMO=true" >> .env
 
-      # Data harus diupload sebagai artifact atau dari external source.
-      # Contoh: download dari S3/GCS/R2
-      # - name: Download training data
-      #   run: |
-      #     aws s3 sync s3://bucket-name/data/ data/historical/
-
-      - name: Run training
+      - name: Run training pipeline
         run: |
-          python main.py train --from-storage --all --force \
-            --days ${{ github.event.inputs.days || '2555' }}
+          python -m training_pipeline.main train \
+            --rolling \
+            --multi-tf \
+            --window-days ${{ github.event.inputs.window_days || '750' }} \
+            --step-days ${{ github.event.inputs.step_days || '30' }} \
+            --num-rolls ${{ github.event.inputs.num_rolls || '12' }}
 
       - name: Upload model artifacts
         uses: actions/upload-artifact@v4
         with:
           name: trained-models
           path: models/
-          retention-days: 30
+          retention-days: 90
 
-      - name: Commit & push models to repo
+      - name: Commit model metadata back to repo
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add models/*/metadata.json models/*/performance.json models/retrain_counter.json
-          git diff --staged --quiet || git commit -m "chore: auto-update model metadata [skip ci]"
-          git push
+          git add models/*/metadata.json models/*/performance.json models/retrain_counter.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No metadata changes to commit"
+          else
+            git commit -m "chore: auto-update model metadata [skip ci]"
+            git push
+          fi
