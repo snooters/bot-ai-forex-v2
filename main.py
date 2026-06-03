@@ -806,8 +806,10 @@ class ForexBot:
         trained_timeframes = self.model_manager.get_trained_timeframes()
         max_retries = 3
 
-        if not trained_timeframes:
-            trained_timeframes = [Timeframe.M5, Timeframe.M15, Timeframe.M30]
+        if data_override:
+            trained_timeframes = sorted(data_override.keys())
+        elif not trained_timeframes:
+            trained_timeframes = [self._tf_to_minutes(tf) for tf in config.trading["timeframes"]]
 
         old_skill = self.model_manager.get_skill_level()
         old_retrains = self.model_manager.get_total_retrains()
