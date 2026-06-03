@@ -123,21 +123,23 @@ class DataLoader:
         if diffs.empty:
             return "UNK"
         median_sec = diffs.median().total_seconds()
+
+        TOLERANCE = 15
         if median_sec < 90:
             return "M1"
-        elif median_sec < 300:
+        elif median_sec <= 300 + TOLERANCE:
             return "M5"
-        elif median_sec < 600:
+        elif median_sec <= 600 + TOLERANCE:
             return "M10"
-        elif median_sec < 900:
+        elif median_sec <= 900 + TOLERANCE:
             return "M15"
-        elif median_sec < 1800:
+        elif median_sec <= 1800 + TOLERANCE:
             return "M30"
-        elif median_sec < 3600:
+        elif median_sec <= 3600 + TOLERANCE:
             return "H1"
-        elif median_sec < 7200:
+        elif median_sec <= 7200 + TOLERANCE:
             return "H2"
-        elif median_sec < 14400:
+        elif median_sec <= 14400 + TOLERANCE:
             return "H4"
         else:
             return "D1"
@@ -214,23 +216,33 @@ class DataLoader:
         fast_df.index = pd.to_datetime(fast_df.index)
         fast_df = fast_df[~fast_df.index.duplicated(keep="last")]
 
-        combined = fast_df[["open", "high", "low", "close", "volume"]].copy()
-        combined.columns = [f"{c}_{fast_tf}" for c in combined.columns]
+        feature_cols = [c for c in fast_df.select_dtypes(include=[np.number]).columns
+                        if c not in ("open", "high", "low", "close", "volume")]
+        ohlcv_base = ["open", "high", "low", "close", "volume"]
+        ohlcv_renamed = [f"{c}_{fast_tf}" for c in ohlcv_base]
+
+        combined = fast_df[ohlcv_base].copy()
+        combined.columns = ohlcv_renamed
+
+        if feature_cols:
+            combined = combined.join(fast_df[feature_cols])
 
         for tf, df in tf_data.items():
             df = df.sort_values("timestamp").set_index("timestamp")
             df.index = pd.to_datetime(df.index)
             df = df[~df.index.duplicated(keep="last")]
-            df = df[["open", "high", "low", "close", "volume"]]
-            df.columns = [f"{c}_{tf}" for c in df.columns]
 
-            df_aligned = df.reindex(combined.index, method="ffill", tolerance=pd.Timedelta(hours=4))
+            all_numeric = [c for c in df.select_dtypes(include=[np.number]).columns
+                           if c not in ("timestamp", "time")]
+            renamed = {c: f"{c}_{tf}" for c in all_numeric}
+            df_aligned = df[all_numeric].rename(columns=renamed)
+            df_aligned = df_aligned.reindex(combined.index, method="ffill", tolerance=pd.Timedelta(hours=4))
             combined = combined.join(df_aligned)
 
         combined = combined.reset_index()
         combined = combined.dropna()
         self.logger.info(
             f"Aligned multi-timeframe data: {len(combined)} rows, "
-            f"columns={list(combined.columns[:8])}..."
+            f"columns={list(combined.columns[:12])}..."
         )
         return combined

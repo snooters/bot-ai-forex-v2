@@ -10,7 +10,7 @@ class TrainingConfig:
     log_dir: str = "./logs"
     log_level: str = "INFO"
 
-    window_days: int = 730
+    window_days: int = 2650
     step_days: int = 30
     prediction_horizon: int = 5
     threshold: float = 0.001
@@ -19,8 +19,8 @@ class TrainingConfig:
     test_split: float = 0.15
 
     rolling: bool = False
-    multi_timeframe: bool = False
-    num_rolls: int = 4
+    multi_timeframe: bool = True
+    num_rolls: int = 1
     retrain_frequency_days: int = 30
 
     feature_list: List[str] = field(default_factory=lambda: [
