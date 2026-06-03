@@ -8,7 +8,7 @@ on:
       window_days:
         description: Training window (days)
         required: false
-        default: '750'
+        default: '2750'
       step_days:
         description: Step per review (days)
         required: false
