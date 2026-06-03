@@ -19,7 +19,7 @@ stdout*.txt
 *.pth
 *.h5
 
-# Historical data (large parquet files)
+# Historical parquet files (archived in forex_data_7years.zip)
 data/historical/
 data/cache/
 data/*.json
@@ -50,5 +50,5 @@ dashboard/
 # Telegram state
 telegram/
 
-# Zip archives
-*.zip
+# Other large archives (if any)
+# *.zip
