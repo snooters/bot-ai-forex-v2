@@ -1,0 +1,9 @@
+{
+  "accuracy": {
+    "xgboost": 0.9990215264187867,
+    "xgboost_val": 0.9941291585127201,
+    "random_forest": 1.0,
+    "random_forest_val": 0.9931506849315068
+  },
+  "samples": 5110
+}
