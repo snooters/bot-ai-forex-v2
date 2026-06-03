@@ -95,9 +95,11 @@ class FeatureEngineer:
         df["high_low_ratio"] = (high - low) / close.replace(0, np.nan)
         df["close_position"] = (close - low) / (high - low).replace(0, np.nan)
 
-        df["volume_ma"] = df.get("volume", pd.Series(0, index=df.index)).rolling(20).mean()
-        vol_col = df.get("volume", pd.Series(0, index=df.index))
-        df["volume_ratio"] = vol_col / df["volume_ma"].replace(0, np.nan)
+        vol = df.get("volume", pd.Series(0, index=df.index))
+        if isinstance(vol, pd.DataFrame):
+            vol = vol.squeeze()
+        df["volume_ma"] = vol.rolling(20).mean()
+        df["volume_ratio"] = vol / df["volume_ma"].replace(0, np.nan)
 
         return df
 
