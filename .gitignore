@@ -1,0 +1,51 @@
+# Environment (contains passwords, API keys, tokens)
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+logs/
+stderr*.txt
+stdout*.txt
+
+# Model binary files (large, regeneratable)
+*.ubj
+*.joblib
+*.pkl
+*.pth
+*.h5
+
+# Historical data (large parquet files)
+data/historical/
+data/cache/
+data/*.json
+
+# Learning artifacts (runtime logs)
+learning/decision_logs/
+learning/performance_logs/
+learning/reasoning_logs/
+learning/trade_history/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Generated reports & results
+reports/
+results/
+
+# Dashboard build
+dashboard/
+
+# Telegram state
+telegram/

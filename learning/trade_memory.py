@@ -1,0 +1,262 @@
+from typing import Dict, List, Optional, Any
+from datetime import datetime, date, timedelta
+from pathlib import Path
+import json
+
+from core.constants import TRADE_HISTORY_DIR
+from utils.logger import get_logger
+
+
+INDICATOR_FIELDS = [
+    "rsi", "macd", "macd_signal", "macd_histogram",
+    "atr", "adx", "plus_di", "minus_di",
+    "bb_upper", "bb_lower", "bb_mid", "bb_width", "bb_pct",
+    "stoch_k", "stoch_d",
+    "ema_20", "ema_50", "ema_200",
+    "momentum_10", "momentum_20",
+    "volatility", "williams_r", "cci",
+    "spread_pips", "obv",
+    "nearest_support", "nearest_resistance",
+    "dist_to_support", "dist_to_resistance",
+    "volume_ratio",
+]
+
+
+class TradeMemory:
+    def __init__(self):
+        self.logger = get_logger("trade_memory")
+        self._memory_dir = Path(TRADE_HISTORY_DIR)
+        self._memory_dir.mkdir(parents=True, exist_ok=True)
+        self._memory_file = self._memory_dir / "trade_memory.json"
+        self._trades: List[Dict] = []
+        self._load()
+
+    def record_trade(
+        self,
+        pair: str,
+        timeframe: str,
+        direction: str,
+        entry_price: float,
+        exit_price: float,
+        volume: float,
+        profit: float,
+        profit_pips: float,
+        result: str,
+        exit_reason: str,
+        entry_time: str,
+        exit_time: str,
+        indicators: Optional[Dict] = None,
+        market_conditions: Optional[Dict] = None,
+        model_version: str = "unknown",
+        confidence: float = 0.0,
+        trade_duration_minutes: Optional[float] = None,
+        max_dd_during_trade: Optional[float] = None,
+        spread_at_entry: float = 0.0,
+    ):
+        if indicators is None:
+            indicators = {}
+        if market_conditions is None:
+            market_conditions = {}
+
+        record = {
+            "pair": pair,
+            "timeframe": timeframe,
+            "direction": direction,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "volume": volume,
+            "profit": round(profit, 2),
+            "profit_pips": round(profit_pips, 1),
+            "result": result,
+            "exit_reason": exit_reason,
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "model_version": model_version,
+            "confidence": round(confidence, 2),
+            "trade_duration_minutes": trade_duration_minutes or self._calc_duration(entry_time, exit_time),
+            "max_dd_during_trade": round(max_dd_during_trade, 4) if max_dd_during_trade else 0,
+            "spread_at_entry": round(spread_at_entry, 1),
+            "indicators": {k: round(v, 6) if isinstance(v, float) else v for k, v in indicators.items() if k in INDICATOR_FIELDS},
+            "market_conditions": market_conditions,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        self._trades.append(record)
+        self._save()
+        return record
+
+    def record_from_trade_log(self, trade: Dict, indicators: Optional[Dict] = None):
+        entry_time_str = trade.get("entry_time", "")
+        exit_time_str = trade.get("exit_time", "")
+        entry_price = trade.get("entry_price", 0) or 0
+        exit_price = trade.get("exit_price", 0) or 0
+        profit = trade.get("profit", 0) or 0
+        profit_pips = trade.get("profit_pips", 0) or 0
+        direction = trade.get("direction", "HOLD")
+
+        result = "WIN" if profit > 0 else "LOSS" if profit < 0 else "BREAK"
+
+        return self.record_trade(
+            pair=trade.get("symbol", "UNKNOWN"),
+            timeframe=trade.get("timeframe", "M15"),
+            direction=direction,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            volume=trade.get("volume", 0),
+            profit=profit,
+            profit_pips=profit_pips,
+            result=result,
+            exit_reason=trade.get("exit_reason", ""),
+            entry_time=entry_time_str,
+            exit_time=exit_time_str,
+            indicators=indicators,
+            market_conditions=trade.get("market_conditions", {}),
+            model_version=trade.get("model_version", "unknown"),
+            confidence=trade.get("confidence", 0),
+            spread_at_entry=trade.get("spread_at_entry", 0),
+        )
+
+    def get_all_trades(self) -> List[Dict]:
+        return list(self._trades)
+
+    def get_wins(self) -> List[Dict]:
+        return [t for t in self._trades if t["result"] == "WIN"]
+
+    def get_losses(self) -> List[Dict]:
+        return [t for t in self._trades if t["result"] == "LOSS"]
+
+    def get_by_pair(self, pair: str) -> List[Dict]:
+        return [t for t in self._trades if t["pair"] == pair]
+
+    def get_by_timeframe(self, tf: str) -> List[Dict]:
+        return [t for t in self._trades if t["timeframe"] == tf]
+
+    def get_by_date_range(self, start_date: date, end_date: date) -> List[Dict]:
+        result = []
+        for t in self._trades:
+            try:
+                t_date = datetime.fromisoformat(t["entry_time"]).date()
+                if start_date <= t_date <= end_date:
+                    result.append(t)
+            except (ValueError, TypeError):
+                pass
+        return result
+
+    def get_recent(self, n: int = 100) -> List[Dict]:
+        return self._trades[-n:]
+
+    def get_win_rate(self, trades: Optional[List[Dict]] = None) -> float:
+        source = trades if trades is not None else self._trades
+        if not source:
+            return 0.0
+        wins = sum(1 for t in source if t["result"] == "WIN")
+        return wins / len(source) * 100
+
+    def get_average_profit(self, trades: Optional[List[Dict]] = None) -> float:
+        source = trades if trades is not None else self._trades
+        if not source:
+            return 0.0
+        return sum(t.get("profit", 0) for t in source) / len(source)
+
+    def count(self, trades: Optional[List[Dict]] = None) -> int:
+        return len(trades) if trades is not None else len(self._trades)
+
+    def find_by_pattern(
+        self,
+        direction: Optional[str] = None,
+        regime: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        min_trades: int = 3,
+    ) -> Dict:
+        matching = []
+        for t in self._trades:
+            if direction and t.get("direction") != direction:
+                continue
+            if timeframe and t.get("timeframe") != timeframe:
+                continue
+            if regime:
+                mc = t.get("market_conditions", {})
+                t_regime = mc.get("regime", "") if mc else ""
+                if regime not in t_regime:
+                    continue
+            matching.append(t)
+
+        closed = [t for t in matching if t.get("result") in ("WIN", "LOSS")]
+        result = {
+            "total": len(matching),
+            "closed": len(closed),
+        }
+        if len(closed) >= min_trades:
+            wins = sum(1 for t in closed if t["result"] == "WIN")
+            losses = len(closed) - wins
+            gross_profit = sum(t.get("profit", 0) for t in closed if t.get("profit", 0) > 0)
+            gross_loss = abs(sum(t.get("profit", 0) for t in closed if t.get("profit", 0) < 0))
+            result.update({
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(wins / len(closed), 4),
+                "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss > 0 else float("inf"),
+                "avg_profit": round(sum(t.get("profit", 0) for t in closed) / len(closed), 4),
+            })
+        return result
+
+    def find_similar(
+        self,
+        indicators: Dict,
+        top_k: int = 5,
+        min_score: float = 0.0,
+    ) -> List[Dict]:
+        if not indicators or not self._trades:
+            return []
+
+        def _cosine_sim(a: Dict, b: Dict) -> float:
+            common = set(a.keys()) & set(b.keys())
+            if len(common) < 3:
+                return 0.0
+            dot = sum(a[k] * b[k] for k in common)
+            na = sum(a[k] ** 2 for k in common) ** 0.5
+            nb = sum(b[k] ** 2 for k in common) ** 0.5
+            if na == 0 or nb == 0:
+                return 0.0
+            return dot / (na * nb)
+
+        scored = []
+        for t in self._trades[-500:]:
+            t_inds = t.get("indicators", {})
+            if not t_inds:
+                continue
+            sim = _cosine_sim(indicators, t_inds)
+            if sim < min_score:
+                continue
+            scored.append((sim, t))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [t for _, t in scored[:top_k]]
+
+    def export_json(self) -> str:
+        return json.dumps(self._trades, indent=2, default=str)
+
+    def _calc_duration(self, entry_time: str, exit_time: str) -> float:
+        try:
+            entry = datetime.fromisoformat(entry_time)
+            exit_dt = datetime.fromisoformat(exit_time) if exit_time else datetime.now()
+            return (exit_dt - entry).total_seconds() / 60
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _load(self):
+        if self._memory_file.exists():
+            try:
+                with open(self._memory_file) as f:
+                    self._trades = json.load(f)
+                self.logger.info(f"Loaded {len(self._trades)} trade memory records")
+            except Exception as e:
+                self.logger.warning(f"Failed to load trade memory: {e}")
+                self._trades = []
+
+    def _save(self):
+        try:
+            with open(self._memory_file, "w") as f:
+                json.dump(self._trades, f, indent=2, default=str)
+        except Exception as e:
+            self.logger.error(f"Failed to save trade memory: {e}")
