@@ -49,3 +49,6 @@ dashboard/
 
 # Telegram state
 telegram/
+
+# Zip archives
+*.zip
