@@ -19,6 +19,7 @@ class TrainingConfig:
     test_split: float = 0.15
 
     rolling: bool = False
+    multi_timeframe: bool = False
     num_rolls: int = 4
     retrain_frequency_days: int = 30
 

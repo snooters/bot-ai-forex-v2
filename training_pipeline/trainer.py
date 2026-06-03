@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .config import TrainingConfig
-from .data_loader import DataLoader
+from .data_loader import DataLoader, TF_LABELS, TF_SORT
 from .features import FeatureEngineer
 from .labeling import LabelEngine
 from .model import XGBoostModel
@@ -28,6 +28,9 @@ class Trainer:
         self.logger.info("=" * 60)
         self.logger.info("STARTING TRAINING PIPELINE")
         self.logger.info("=" * 60)
+
+        if self.config.multi_timeframe:
+            return self._train_multi_timeframe()
 
         df = self.data_loader.load()
         self.logger.info(f"Loaded {len(df)} rows")
@@ -54,6 +57,55 @@ class Trainer:
         if self.config.rolling:
             return self._train_rolling(df, features)
         return self._train_standard(df, features)
+
+    def _select_base_timeframe(self, tf_data, tfs):
+        window = timedelta(days=self.config.window_days)
+        for tf in tfs:
+            df = tf_data[tf]
+            span = df["timestamp"].max() - df["timestamp"].min()
+            self.logger.info(f"  {tf}: {len(df)} rows, span={span.days}d")
+            if span >= window:
+                self.logger.info(f"  -> Selected {tf} as base timeframe ({span.days}d >= {window.days}d)")
+                return tf
+        best = max(tfs, key=lambda k: tf_data[k]["timestamp"].max() - tf_data[k]["timestamp"].min())
+        self.logger.warning(f"No timeframe covers {window.days}d window. Using {best} as base (longest span).")
+        return best
+
+    def _train_multi_timeframe(self) -> Dict[str, Any]:
+        self.logger.info("Multi-timeframe training mode")
+        tf_data = self.data_loader.load_multi_timeframe()
+        tfs = sorted(tf_data.keys(), key=lambda k: TF_SORT.get(k, 999))
+
+        fast_tf = self._select_base_timeframe(tf_data, tfs)
+        self.logger.info(f"Base timeframe: {fast_tf}, Higher timeframes: {[t for t in tfs if t != fast_tf]}")
+
+        featured = {}
+        for tf, df in tf_data.items():
+            self.logger.info(f"Computing features for {tf} ({len(df)} rows)...")
+            fdf = self.feature_engineer.compute_all(df)
+            if fdf.empty:
+                raise ValueError(f"No data after feature engineering for {tf}")
+            featured[tf] = fdf
+
+        aligned = self.data_loader.align_timeframes(featured, fast_tf)
+        if aligned.empty:
+            raise ValueError("No data after aligning timeframes")
+
+        aligned = self.label_engine.create_labels(aligned)
+        if aligned.empty:
+            raise ValueError("No data after labeling")
+
+        features = self.feature_engineer.get_feature_columns(aligned)
+        if not features:
+            raise ValueError("No feature columns found")
+
+        self.logger.info(f"Using {len(features)} features from {len(tfs)} timeframes")
+        self.model.build()
+        self.model.feature_names = features
+
+        if self.config.rolling:
+            return self._train_rolling(aligned, features)
+        return self._train_standard(aligned, features)
 
     def _train_standard(self, df: pd.DataFrame, features: List[str]) -> Dict[str, Any]:
         train_df, val_df, test_df = self.data_loader.train_val_test_split(df)

@@ -22,6 +22,7 @@ def cmd_train(args: argparse.Namespace):
         log_dir=args.log_dir,
         log_level=args.log_level,
         rolling=args.rolling,
+        multi_timeframe=args.multi_tf,
         window_days=args.window_days,
         step_days=args.step_days,
         prediction_horizon=args.horizon,
@@ -33,6 +34,7 @@ def cmd_train(args: argparse.Namespace):
     logger.info("TRAINING COMMAND")
     logger.info(f"Data path: {config.data_path}")
     logger.info(f"Rolling: {config.rolling}")
+    logger.info(f"Multi-TF: {config.multi_timeframe}")
     logger.info(f"Window: {config.window_days}d, Step: {config.step_days}d")
     logger.info(f"Horizon: {config.prediction_horizon}, Threshold: {config.threshold}")
     logger.info("=" * 60)
@@ -142,6 +144,8 @@ def main():
                         help="Log level")
     parser.add_argument("--rolling", action="store_true",
                         help="Enable rolling window training")
+    parser.add_argument("--multi-tf", action="store_true",
+                        help="Multi-timeframe training (load files, align, merge features)")
     parser.add_argument("--window-days", type=int, default=730,
                         help="Training window size in days")
     parser.add_argument("--step-days", type=int, default=30,

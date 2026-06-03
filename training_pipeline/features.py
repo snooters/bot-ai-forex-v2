@@ -116,7 +116,13 @@ class FeatureEngineer:
             "label", "label_encoded", "spread", "symbol", "timeframe",
             "tick_volume",
         }
-        cols = [c for c in df.columns if c not in exclude]
+        base_exclude = {"open", "high", "low", "close", "volume"}
+        full_exclude = exclude.copy()
+        for suffix in ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]:
+            for b in base_exclude:
+                full_exclude.add(f"{b}_{suffix}")
+
+        cols = [c for c in df.columns if c not in full_exclude]
         numeric_types = df[cols].select_dtypes(include=[np.number]).columns.tolist()
         non_numeric = set(cols) - set(numeric_types)
         if non_numeric:
