@@ -204,6 +204,21 @@ class DataLoader:
 
         return df.reset_index(drop=True)
 
+    def train_val_test_split(
+        self, df: pd.DataFrame
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        n = len(df)
+        test_end = int(n * (1 - self.config.test_split))
+        val_end = int(test_end * (1 - self.config.val_split))
+        train_df = df.iloc[:val_end].copy()
+        val_df = df.iloc[val_end:test_end].copy()
+        test_df = df.iloc[test_end:].copy()
+        self.logger.info(
+            f"Temporal split: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}"
+        )
+        return train_df, val_df, test_df
+
     def align_timeframes(
         self, tf_data: Dict[str, pd.DataFrame], fast_tf: str = "M5"
     ) -> pd.DataFrame:
