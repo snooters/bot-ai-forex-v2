@@ -87,6 +87,16 @@ class Trainer:
                 raise ValueError(f"No data after feature engineering for {tf}")
             featured[tf] = fdf
 
+        base_span = (featured[fast_tf]["timestamp"].max() - featured[fast_tf]["timestamp"].min()).days
+        for tf in list(featured.keys()):
+            if tf == fast_tf:
+                continue
+            span = (featured[tf]["timestamp"].max() - featured[tf]["timestamp"].min()).days
+            min_span = max(30, int(base_span * 0.1))
+            if span < min_span:
+                self.logger.warning(f"Skipping {tf} for alignment: span={span}d < min={min_span}d (10% of base={base_span}d)")
+                del featured[tf]
+
         aligned = self.data_loader.align_timeframes(featured, fast_tf)
         if aligned.empty:
             raise ValueError("No data after aligning timeframes")
