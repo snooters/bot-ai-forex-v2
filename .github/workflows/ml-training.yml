@@ -1,0 +1,83 @@
+name: Auto Training
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: Training window (days)
+        required: false
+        default: '750'
+      step_days:
+        description: Step per review (days)
+        required: false
+        default: '30'
+      num_rolls:
+        description: Jumlah rolling window
+        required: false
+        default: '12'
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Extract training data
+        run: |
+          mkdir -p data/historical
+          python -c "
+import zipfile
+with zipfile.ZipFile('forex_data_7years.zip') as z:
+    z.extractall('data/historical')
+print('Extracted', len(z.namelist()), 'files')
+"
+          find data/historical -name '*.parquet' | head -10
+
+      - name: Setup .env
+        run: |
+          cp .env.example .env
+          echo "LEARN_ONLY=true" >> .env
+          echo "TRADING_MODE=simulation" >> .env
+          echo "IS_DEMO=true" >> .env
+
+      - name: Run training pipeline
+        run: "python -m training_pipeline.main train --rolling --multi-tf --window-days ${{ github.event.inputs.window_days || '750' }} --step-days ${{ github.event.inputs.step_days || '30' }} --num-rolls ${{ github.event.inputs.num_rolls || '12' }}"
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-models
+          path: models/
+          retention-days: 90
+
+      - name: Commit model metadata back to repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add models/*/metadata.json models/*/performance.json models/retrain_counter.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo No metadata changes to commit
+          else
+            git commit -m "chore: auto-update model metadata [skip ci]"
+            git push
+          fi
