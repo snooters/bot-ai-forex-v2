@@ -22,21 +22,34 @@ class DataLoader:
 
         if data_path.is_file():
             return self._load_single(data_path)
-        return self._load_directory(data_path)
 
-    def _load_directory(self, directory: Path) -> pd.DataFrame:
-        parquet_files = sorted(directory.rglob("*.parquet"))
-        if not parquet_files:
-            raise FileNotFoundError(f"No .parquet files found in {directory}")
+        files = sorted(data_path.rglob("*.parquet"))
+        if not files:
+            raise FileNotFoundError(f"No .parquet files found in {data_path}")
 
-        self.logger.info(f"Found {len(parquet_files)} parquet files in {directory}")
+        self.logger.info(f"Found {len(files)} parquet files in {data_path}")
+
+        if len(files) > 1:
+            timeframes = set()
+            for f in files:
+                parts = f.stem.split("_")
+                if len(parts) >= 2:
+                    timeframes.add(parts[-1])
+            if len(timeframes) > 1:
+                self.logger.warning(
+                    f"Multiple timeframe files detected: {sorted(timeframes)}. "
+                    f"Mixing them will corrupt feature engineering. "
+                    f"Use --data-path <single_file.parquet> instead."
+                )
+
         dfs = []
-        for fpath in parquet_files:
+        for fpath in files:
             try:
                 df = self._load_single(fpath)
                 if df is not None and not df.empty:
                     dfs.append(df)
-                    self.logger.info(f"  Loaded {fpath.name}: {len(df)} rows")
+                    self.logger.info(f"  Loaded {fpath.name}: {len(df)} rows, "
+                                    f"range={df['timestamp'].min()} to {df['timestamp'].max()}")
             except Exception as e:
                 self.logger.warning(f"  Skipped {fpath.name}: {e}")
 
@@ -45,7 +58,28 @@ class DataLoader:
 
         combined = pd.concat(dfs, ignore_index=True)
         combined = self._clean(combined)
-        self.logger.info(f"Combined dataset: {len(combined)} rows")
+
+        before_dedup = len(combined)
+        combined = combined.drop_duplicates(subset=["timestamp"], keep="last").reset_index(drop=True)
+        if before_dedup != len(combined):
+            self.logger.warning(f"Dropped {before_dedup - len(combined)} duplicate timestamps "
+                                f"(likely from mixed timeframe files)")
+
+        self.logger.info(
+            f"Combined dataset: {len(combined)} rows, "
+            f"range={combined['timestamp'].min()} to {combined['timestamp'].max()}"
+        )
+
+        interval = combined["timestamp"].diff().dropna()
+        if not interval.empty:
+            median_interval = interval.median()
+            self.logger.info(f"Median interval: {median_interval}")
+            if len(files) > 1 and median_interval > pd.Timedelta(minutes=1):
+                self.logger.warning(
+                    f"Median interval is {median_interval}. Data appears to be "
+                    f"mixed timeframe. Strongly recommend using a single file."
+                )
+
         return combined
 
     def _load_single(self, path: Path) -> pd.DataFrame:
@@ -86,7 +120,6 @@ class DataLoader:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
             df = df.dropna(subset=["timestamp"])
             df = df.sort_values("timestamp").reset_index(drop=True)
-            df = df.drop_duplicates(subset=["timestamp"], keep="last")
 
         for col in ["open", "high", "low", "close", "volume"]:
             if col in df.columns:

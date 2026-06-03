@@ -178,7 +178,14 @@ class Trainer:
             current_start += step
 
         if not all_reports:
-            raise ValueError("No valid rolling windows found")
+            data_span = (end - start).days
+            raise ValueError(
+                f"No valid rolling windows found. Total data: {len(df)} rows, "
+                f"span={data_span}d from {start.date()} to {end.date()}. "
+                f"window_days={self.config.window_days}d exceeds available data span. "
+                f"Use --window-days (e.g. {max(30, data_span // 2)}) or point to a single "
+                f"timeframe file with --data-path."
+            )
 
         summary = {
             "num_rolls_completed": len(all_reports),
