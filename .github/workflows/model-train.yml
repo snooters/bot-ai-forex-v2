@@ -43,15 +43,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Extract training data
-        run: |
-          mkdir -p data/historical
-          python -c "
-import zipfile
-with zipfile.ZipFile('forex_data_7years.zip') as z:
-    z.extractall('data/historical')
-print('Extracted', len(z.namelist()), 'files')
-"
-          find data/historical -name '*.parquet' | head -10
+        run: python -c "import zipfile; zipfile.ZipFile('forex_data_7years.zip').extractall('data/historical'); print('extracted')"
+
+      - name: Verify data
+        run: find data/historical -name '*.parquet' | head -10
 
       - name: Setup .env
         run: |
@@ -76,7 +71,7 @@ print('Extracted', len(z.namelist()), 'files')
           git config user.email "actions@github.com"
           git add models/*/metadata.json models/*/performance.json models/retrain_counter.json 2>/dev/null || true
           if git diff --staged --quiet; then
-            echo No metadata changes to commit
+            echo No metadata changes
           else
             git commit -m "chore: auto-update model metadata [skip ci]"
             git push
