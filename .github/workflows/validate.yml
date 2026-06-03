@@ -1,0 +1,55 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Setup .env
+        run: cp .env.example .env
+
+      - name: Lint
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.git,__pycache__
+
+      - name: Validate model metadata
+        run: |
+          python -c "
+import json
+from pathlib import Path
+models = list(Path('models').glob('model_*/metadata.json'))
+print(f'Found {len(models)} model versions')
+for m in sorted(models):
+    data = json.loads(m.read_text())
+    print(f'  {data[\"version\"]:20s} tf={data[\"timeframe\"]:4s} created={data[\"created_at\"][:19]}')
+"
+
+      - name: Validate config
+        run: python -c "from core.config import config; print('Config OK')"
+
+      - name: Validate imports
+        run: python -c "
+from ml.trainer import ModelTrainer
+from ml.predictor import MLPredictor
+from ml.model_manager import ModelManager
+from ml.ensemble import VotingEnsemble
+print('All imports OK')
+"
