@@ -166,7 +166,12 @@ class DataLoader:
             "vol": "volume",
             "real_volume": "volume",
         }
-        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+        for old, new in rename.items():
+            if old in df.columns:
+                if new not in df.columns:
+                    df = df.rename(columns={old: new})
+                elif old != new:
+                    df = df.drop(columns=[old])
         return df
 
     def _validate(self, df: pd.DataFrame) -> Optional[str]:

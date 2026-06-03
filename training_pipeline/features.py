@@ -97,7 +97,7 @@ class FeatureEngineer:
 
         vol = df.get("volume", pd.Series(0, index=df.index))
         if isinstance(vol, pd.DataFrame):
-            vol = vol.squeeze()
+            vol = vol.iloc[:, 0]
         df["volume_ma"] = vol.rolling(20).mean()
         df["volume_ratio"] = vol / df["volume_ma"].replace(0, np.nan)
 
