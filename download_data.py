@@ -123,6 +123,17 @@ def download_m5_range(
     return df_out
 
 
+def _resolve_symbol(mt5, symbol: str) -> str:
+    """Auto-detect full symbol name (add .fl if needed)."""
+    if mt5.symbol_select(symbol, True):
+        return symbol
+    alt = f"{symbol}.fl"
+    if not symbol.endswith(".fl") and mt5.symbol_select(alt, True):
+        logger.info(f"  Symbol '{symbol}' not found, using '{alt}'")
+        return alt
+    return symbol
+
+
 def download_and_save(
     connector: MT5Connector,
     storage: ParquetStorage,
@@ -133,6 +144,9 @@ def download_and_save(
     from_year = max(from_year, 2010)
     from_date = datetime(from_year, 1, 1)
     to_date = datetime.now()
+
+    # Auto-detect symbol (.fl suffix)
+    symbol = _resolve_symbol(connector._mt5, symbol)
 
     logger.info(f"\n{'='*60}")
     logger.info(f"Downloading {symbol} M5 since {from_year}")
