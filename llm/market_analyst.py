@@ -60,7 +60,11 @@ Output JSON format:
   "reasoning": "brief explanation"
 }}"""
 
-        content = await self.llm.query(system_prompt, user_prompt, cache_key=cache_key)
+        try:
+            content = await self.llm.query(system_prompt, user_prompt, cache_key=cache_key)
+        except Exception as e:
+            self.logger.warning(f"LLM market analysis skipped for {symbol}: {e}")
+            return None
         if not content:
             return None
 

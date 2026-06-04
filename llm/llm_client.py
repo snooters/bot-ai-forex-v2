@@ -115,7 +115,7 @@ class LLMClient:
         user_prompt: str,
         max_tokens: int = 500,
         temperature: float = 0.1,
-        timeout: float = 30.0,
+        timeout: float = 5.0,
         cache_key: Optional[str] = None,
     ) -> Optional[str]:
         if not self._enabled:
@@ -177,6 +177,9 @@ class LLMClient:
                     await asyncio.sleep(wait)
                 else:
                     self.logger.warning("LLM request timed out after retries")
+            except Exception as e:
+                self.logger.warning(f"LLM request failed ({type(e).__name__}): {e}")
+                return None
         return None
 
     @property

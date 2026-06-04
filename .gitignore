@@ -12,6 +12,9 @@ logs/
 stderr*.txt
 stdout*.txt
 
+# Agent instructions (project local context, not for git)
+AGENTS.md
+
 # Model binary files (large, regeneratable)
 *.ubj
 *.joblib

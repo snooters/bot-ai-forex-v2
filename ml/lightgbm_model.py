@@ -54,7 +54,8 @@ class LightGBMModel:
         return self.model
 
     @safe_execute(default_return=None, raise_on_error=True)
-    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None):
+    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
+              progress_callback=None):
         if self.model is None:
             self.create_model()
         _X_train = X_train
@@ -70,6 +71,11 @@ class LightGBMModel:
         fit_kwargs = {"eval_set": eval_set}
         if sample_weight is not None:
             fit_kwargs["sample_weight"] = sample_weight
+        if progress_callback is not None:
+            n_estimators = self.model.get_params().get("n_estimators", 200)
+            def _lgb_callback(env):
+                progress_callback(env.iteration + 1)
+            fit_kwargs["callbacks"] = [_lgb_callback]
         self.model.fit(_X_train, y_train, **fit_kwargs)
         self._trained = True
         train_score = self.model.score(X_train, y_train)

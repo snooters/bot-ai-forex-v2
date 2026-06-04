@@ -52,7 +52,10 @@ class SkillScorer:
         if self._score_file.exists():
             try:
                 with open(self._score_file) as f:
-                    return json.load(f)
+                    data = json.load(f)
+                if isinstance(data, dict) and "scores" in data:
+                    return data["scores"]
+                return data
             except Exception:
                 pass
         return {}

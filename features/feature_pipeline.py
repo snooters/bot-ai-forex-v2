@@ -10,6 +10,8 @@ from features.market_structure import MarketStructureEngine
 from features.support_resistance import SupportResistanceEngine
 from features.price_action import PriceActionEngine
 from features.candle_patterns import CandlePatternEngine
+from features.session_features import SessionFeatureEngine
+from features.multi_tf_features import MultiTFFeatureEngine
 from data.data_cache import FeatureCache
 from utils.logger import get_logger
 from utils.decorators import measure_time, safe_execute
@@ -23,6 +25,8 @@ class FeaturePipeline:
         self.support_resistance = SupportResistanceEngine()
         self.price_action = PriceActionEngine()
         self.candle_patterns = CandlePatternEngine()
+        self.session_features = SessionFeatureEngine()
+        self.multi_tf_features = MultiTFFeatureEngine()
         self.cache = FeatureCache()
 
     @measure_time
@@ -36,6 +40,8 @@ class FeaturePipeline:
             self.logger.warning(f"Insufficient data for feature computation: {len(df)} rows")
             return df
 
+        df = self.session_features.compute(df)
+
         df = self.indicator_engine.compute(df)
 
         df = self.market_structure.detect_structures(df)
@@ -47,6 +53,8 @@ class FeaturePipeline:
         df = self.candle_patterns.detect_patterns(df)
 
         df = self._add_derived_features(df)
+
+        df = self.multi_tf_features.compute(df)
 
         df = self._clean_data(df)
 
@@ -169,7 +177,7 @@ class FeaturePipeline:
         return df
 
     def get_feature_columns(self) -> List[str]:
-        return [
+        base = [
             "ema_20", "ema_50", "ema_200",
             "ema_cross", "ema_slope_20", "ema_slope_50",
             "price_vs_ema200",
@@ -191,4 +199,24 @@ class FeaturePipeline:
             "price_position",
             "nearest_support", "nearest_resistance",
             "dist_to_support", "dist_to_resistance",
+            "pattern_bullish", "pattern_bearish",
+            "vwap",
+            "hour", "day_of_week", "is_weekend",
+            "session_asia", "session_london", "session_ny", "session_overlap",
+            "is_monday", "is_friday", "is_midweek", "is_market_hours",
+            "mtf_alignment",
         ]
+        for tf in [15, 30, 60, 240]:
+            cols = [
+                f"trend{tf}", f"momentum{tf}", f"volatility{tf}",
+                f"atr{tf}", f"rsi{tf}",
+                f"ema_cross{tf}", f"adx{tf}", f"adx_strong{tf}",
+                f"align{tf}",
+                f"ema_50_tf{tf}", f"ema_200_tf{tf}",
+            ]
+            if tf <= 30:
+                cols += [f"ema_20_tf{tf}", f"close_vs_ema20{tf}"]
+            if tf <= 15:
+                cols += [f"macd{tf}"]
+            base += cols
+        return base

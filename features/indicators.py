@@ -103,6 +103,15 @@ def compute_stochastic(
     return k, d
 
 
+def compute_vwap(
+    high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series
+) -> pd.Series:
+    typical_price = (high + low + close) / 3
+    cum_pv = (typical_price * volume).cumsum()
+    cum_vol = volume.cumsum()
+    return cum_pv / cum_vol.replace(0, np.nan)
+
+
 def compute_momentum(series: pd.Series, period: int = 10) -> pd.Series:
     return series / series.shift(period) - 1
 
@@ -166,6 +175,8 @@ def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["minus_di"] = minus_di
 
     df["atr"] = compute_atr(high, low, close)
+
+    df["vwap"] = compute_vwap(high, low, close, volume)
 
     bb_upper, bb_mid, bb_lower = compute_bollinger_bands(close)
     df["bb_upper"] = bb_upper

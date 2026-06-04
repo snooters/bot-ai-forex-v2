@@ -62,8 +62,10 @@ class MarketScorer:
 
         if direction in [TrendDirection.STRONG_BULLISH.value, TrendDirection.STRONG_BEARISH.value]:
             base = 80
+        elif direction in [TrendDirection.BULLISH.value, TrendDirection.BEARISH.value]:
+            base = 78
         elif direction in [TrendDirection.WEAK_BULLISH.value, TrendDirection.WEAK_BEARISH.value]:
-            base = 60
+            base = 75
         elif direction == TrendDirection.CONSOLIDATION.value:
             base = 30
         else:
@@ -94,7 +96,7 @@ class MarketScorer:
         alignment = 1 if (mom_dir > 0 and "BULLISH" in trend_result.get("direction", "")) or \
                          (mom_dir < 0 and "BEARISH" in trend_result.get("direction", "")) else 0
 
-        return min(mom_score * (0.5 + 0.5 * alignment), 100)
+        return min(mom_score * (0.7 + 0.3 * alignment), 100)
 
     def _score_regime(self, regime_result: Dict) -> float:
         regime = regime_result.get("regime", MarketRegime.SIDEWAYS.value)
@@ -131,13 +133,13 @@ class MarketScorer:
             if distance_pct > 0.01:
                 score = min(100 - distance_pct * 1000, 85)
             else:
-                score = 30
+                score = 45
         elif "BEARISH" in trend_dir and nearest_support:
             distance_pct = dist_to_support / nearest_support if nearest_support > 0 else 0.01
             if distance_pct > 0.01:
                 score = min(100 - distance_pct * 1000, 85)
             else:
-                score = 30
+                score = 45
         else:
             score = 50
 

@@ -1,5 +1,7 @@
+from datetime import datetime
 from typing import Dict, Optional, List
 
+from core.config import config
 from core.constants import PositionAction, TradeDirection
 from data.market_data_engine import MarketDataEngine
 from trading.execution_engine import ExecutionEngine
@@ -24,22 +26,23 @@ class ExitEngine:
         regime_result: Dict,
         confidence: float,
         market_structure: Dict,
+        atr: float = 0,
     ) -> PositionAction:
         action = PositionAction.HOLD
         reasons = []
 
-        if trend_result.get("direction") in ["STRONG_BEARISH", "WEAK_BEARISH"] and position["type"] == "BUY":
+        if trend_result.get("direction") in ["STRONG_BEARISH", "BEARISH", "WEAK_BEARISH"] and position["type"] == "BUY":
             action = PositionAction.FULL_CLOSE
             reasons.append("Trend reversed against position")
 
-        if trend_result.get("direction") in ["STRONG_BULLISH", "WEAK_BULLISH"] and position["type"] == "SELL":
+        if trend_result.get("direction") in ["STRONG_BULLISH", "BULLISH", "WEAK_BULLISH"] and position["type"] == "SELL":
             action = PositionAction.FULL_CLOSE
             reasons.append("Trend reversed against position")
 
-        if confidence < 30:
+        if confidence < 0.30:
             if action != PositionAction.FULL_CLOSE:
                 action = PositionAction.FULL_CLOSE
-                reasons.append(f"Confidence dropped to {confidence:.1f}%")
+                reasons.append(f"Confidence dropped to {confidence:.0%}")
 
         if market_structure:
             if market_structure.get("has_bos"):
@@ -51,20 +54,47 @@ class ExitEngine:
             action = PositionAction.FULL_CLOSE
             reasons.append("News driven market - closing positions")
 
+        # ── TP-based auto close ──
+        tp = position.get("tp", 0) or 0
+        if tp > 0:
+            if (position["type"] == "BUY" and current_price >= tp) or \
+               (position["type"] == "SELL" and current_price <= tp):
+                action = PositionAction.FULL_CLOSE
+                reasons.append("Take profit reached")
+
+        # ── No-TP profit target close ──
+        if not tp and atr > 0:
+            entry = position.get("price_open", 0)
+            profit_distance = abs(current_price - entry)
+            target_distance = atr * 2.0
+            if profit_distance >= target_distance:
+                action = PositionAction.FULL_CLOSE
+                reasons.append(f"Profit target reached ({profit_distance/atr:.1f}× ATR)")
+
+        # ── ATR-based trailing stop ──
         current_profit = position.get("profit", 0)
         if current_profit > 0:
-            trailing_distance = current_price * 0.001
+            trailing_dist = atr * config.risk.get("trailing_atr_multiplier", 1.5) if atr > 0 else current_price * 0.001
             current_sl = position.get("sl", 0)
             if position["type"] == "BUY":
-                new_sl = current_price - trailing_distance
+                new_sl = current_price - trailing_dist
                 if new_sl > current_sl:
                     action = PositionAction.TRAILING_STOP
                     reasons.append(f"Trailing stop moved to {new_sl:.5f}")
             else:
-                new_sl = current_price + trailing_distance
+                new_sl = current_price + trailing_dist
                 if new_sl < current_sl or current_sl == 0:
                     action = PositionAction.TRAILING_STOP
                     reasons.append(f"Trailing stop moved to {new_sl:.5f}")
+
+        # ── Time-based exit ──
+        open_time = position.get("time")
+        if open_time:
+            max_hold_seconds = config.risk.get("max_hold_hours", 12) * 3600
+            elapsed = (datetime.now() - open_time).total_seconds()
+            if elapsed > max_hold_seconds:
+                action = PositionAction.FULL_CLOSE
+                reasons.append(f"Max hold time reached ({elapsed/3600:.1f}h)")
 
         return action
 

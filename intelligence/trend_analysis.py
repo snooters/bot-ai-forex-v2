@@ -33,6 +33,18 @@ class TrendAnalyzer:
         signals.append(adx_score)
         result["adx_score"] = adx_score
 
+        rsi_score = self._check_rsi_momentum(df)
+        signals.append(rsi_score)
+        result["rsi_score"] = rsi_score
+
+        macd_score = self._check_macd_trend(df)
+        signals.append(macd_score)
+        result["macd_score"] = macd_score
+
+        divergence = self._check_divergence(df)
+        signals.append(divergence)
+        result["divergence"] = divergence
+
         direction_scores = [s.get("direction", 0) for s in signals]
         strength_scores = [s.get("strength", 0) for s in signals]
 
@@ -42,16 +54,18 @@ class TrendAnalyzer:
         avg_direction = np.clip(avg_direction, -1, 1)
         avg_strength = np.clip(avg_strength, 0, 1)
 
-        if avg_direction > 0.2:
-            if avg_strength > 0.6:
-                result["direction"] = TrendDirection.STRONG_BULLISH.value
-            else:
-                result["direction"] = TrendDirection.WEAK_BULLISH.value
-        elif avg_direction < -0.2:
-            if avg_strength > 0.6:
-                result["direction"] = TrendDirection.STRONG_BEARISH.value
-            else:
-                result["direction"] = TrendDirection.WEAK_BEARISH.value
+        if avg_direction > 0.6:
+            result["direction"] = TrendDirection.STRONG_BULLISH.value
+        elif avg_direction > 0.3:
+            result["direction"] = TrendDirection.BULLISH.value
+        elif avg_direction > 0.15:
+            result["direction"] = TrendDirection.WEAK_BULLISH.value
+        elif avg_direction < -0.6:
+            result["direction"] = TrendDirection.STRONG_BEARISH.value
+        elif avg_direction < -0.3:
+            result["direction"] = TrendDirection.BEARISH.value
+        elif avg_direction < -0.15:
+            result["direction"] = TrendDirection.WEAK_BEARISH.value
         else:
             if avg_strength < 0.3:
                 result["direction"] = TrendDirection.SIDEWAYS.value
@@ -132,16 +146,102 @@ class TrendAnalyzer:
 
         return {"direction": float(direction), "strength": float(strength)}
 
+    def _check_rsi_momentum(self, df: pd.DataFrame) -> Dict:
+        if "rsi" not in df.columns:
+            return {"direction": 0, "strength": 0}
+        rsi_val = df["rsi"].iloc[-1]
+        if pd.isna(rsi_val):
+            return {"direction": 0, "strength": 0}
+        if rsi_val > 60:
+            direction = 1.0
+            strength = min((rsi_val - 60) / 40, 1.0)
+        elif rsi_val < 40:
+            direction = -1.0
+            strength = min((40 - rsi_val) / 40, 1.0)
+        else:
+            direction = 0.0
+            strength = 0.0
+        return {"direction": float(direction), "strength": float(strength)}
+
+    def _check_macd_trend(self, df: pd.DataFrame) -> Dict:
+        if "macd" not in df.columns or "macd_signal" not in df.columns:
+            return {"direction": 0, "strength": 0}
+        macd_val = df["macd"].iloc[-1]
+        signal_val = df["macd_signal"].iloc[-1]
+        if pd.isna(macd_val) or pd.isna(signal_val):
+            return {"direction": 0, "strength": 0}
+        if macd_val > signal_val:
+            direction = 1.0
+            macd_above_zero = 1 if macd_val > 0 else 0.5
+            strength = min(abs(macd_val - signal_val) / max(abs(signal_val), 0.0001), 1.0)
+            strength = strength * macd_above_zero
+        elif macd_val < signal_val:
+            direction = -1.0
+            macd_below_zero = 1 if macd_val < 0 else 0.5
+            strength = min(abs(macd_val - signal_val) / max(abs(signal_val), 0.0001), 1.0)
+            strength = strength * macd_below_zero
+        else:
+            direction = 0.0
+            strength = 0.0
+        return {"direction": float(direction), "strength": float(strength)}
+
+    def _check_divergence(self, df: pd.DataFrame) -> Dict:
+        if len(df) < 30 or "rsi" not in df.columns:
+            return {"direction": 0, "strength": 0}
+
+        close = df["close"].values
+        rsi = df["rsi"].values
+
+        recent_start = max(0, len(close) - 15)
+        window_close = close[recent_start:]
+        window_rsi = rsi[recent_start:]
+
+        if len(window_close) < 5:
+            return {"direction": 0, "strength": 0}
+
+        price_highest_idx = np.argmax(window_close)
+        price_highest = window_close[price_highest_idx]
+
+        if price_highest_idx < 2 or price_highest_idx >= len(window_close) - 2:
+            return {"direction": 0, "strength": 0}
+
+        prev_high_idx = np.argmax(window_close[:price_highest_idx])
+        prev_high_price = window_close[prev_high_idx]
+        prev_high_rsi = window_rsi[prev_high_idx]
+        current_rsi = window_rsi[price_highest_idx]
+
+        if price_highest > prev_high_price and current_rsi < prev_high_rsi:
+            strength = min((prev_high_rsi - current_rsi) / 20, 1.0)
+            return {"direction": -0.8, "strength": float(strength), "type": "BEARISH_DIVERGENCE"}
+
+        rsi_lowest_idx = np.argmin(window_rsi)
+        if rsi_lowest_idx < 2 or rsi_lowest_idx >= len(window_rsi) - 2:
+            return {"direction": 0, "strength": 0}
+
+        prev_low_idx = np.argmin(window_rsi[:rsi_lowest_idx])
+        prev_low_price = window_close[prev_low_idx]
+        prev_low_rsi = window_rsi[prev_low_idx]
+        current_price_low = window_close[rsi_lowest_idx]
+        current_rsi_low = window_rsi[rsi_lowest_idx]
+
+        if current_price_low < prev_low_price and current_rsi_low > prev_low_rsi:
+            strength = min((current_rsi_low - prev_low_rsi) / 20, 1.0)
+            return {"direction": 0.8, "strength": float(strength), "type": "BULLISH_DIVERGENCE"}
+
+        return {"direction": 0, "strength": 0}
+
     def is_bullish(self, trend_result: Dict) -> bool:
         return trend_result["direction"] in [
             TrendDirection.STRONG_BULLISH.value,
-            TrendDirection.WEAK_BULLISH.value
+            TrendDirection.BULLISH.value,
+            TrendDirection.WEAK_BULLISH.value,
         ]
 
     def is_bearish(self, trend_result: Dict) -> bool:
         return trend_result["direction"] in [
             TrendDirection.STRONG_BEARISH.value,
-            TrendDirection.WEAK_BEARISH.value
+            TrendDirection.BEARISH.value,
+            TrendDirection.WEAK_BEARISH.value,
         ]
 
     def is_sideways(self, trend_result: Dict) -> bool:

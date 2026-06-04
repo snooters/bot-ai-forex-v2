@@ -59,7 +59,7 @@ class OOSValidator:
         )
 
         try:
-            X_train, y_train, _ = trainer.prepare_training_data(train_df, lookahead=LOOKAHEAD_5)
+            X_train, y_train, _, _ = trainer.prepare_training_data(train_df, lookahead=LOOKAHEAD_5)
         except Exception as e:
             return self._empty_result(f"train data prep failed: {e}")
 

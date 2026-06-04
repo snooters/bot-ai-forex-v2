@@ -64,6 +64,10 @@ class MarketDataEngine:
                 self.cache.set(symbol, timeframe, df)
             return df
         except MT5DataError as e:
+            is_live = config.account["trading_mode"] == "live"
+            if is_live:
+                self.logger.warning(f"LIVE: data unavailable for {symbol} tf={timeframe} — {e}")
+                return pd.DataFrame()
             self.logger.warning(f"get_rates failed for {symbol} tf={timeframe}: {e}")
             stored = self.storage.load_data(symbol, timeframe)
             if not stored.empty and len(stored) >= count:
@@ -154,6 +158,22 @@ class MarketDataEngine:
 
     def get_latest_candles(self, symbol: str, timeframe: int, count: int = 10) -> pd.DataFrame:
         return self.get_rates(symbol, timeframe, count=count, force_refresh=True)
+
+    def check_last_candle(self, symbol: str, timeframe: int) -> Optional[float]:
+        try:
+            df = self.connector.get_rates(symbol, timeframe, count=1)
+            if df is not None and not df.empty:
+                return df["time"].iloc[-1].timestamp()
+        except Exception as e:
+            self.logger.debug(f"check_last_candle via connector failed: {e}")
+        try:
+            self.connector.ensure_connected()
+            rates = self.connector._mt5.copy_rates_from_pos(symbol, timeframe, 0, 1)
+            if rates is not None and len(rates) > 0:
+                return float(rates[0][0])
+        except Exception:
+            pass
+        return None
 
     def get_multi_timeframe_data(
         self, symbol: str, timeframes: Optional[List[int]] = None, count: int = 100,

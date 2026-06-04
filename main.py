@@ -10,7 +10,10 @@ import argparse
 import sys
 import time
 from datetime import datetime, date, timedelta
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+import pandas as pd
+import numpy as np
 
 from core.config import config
 from core.constants import (
@@ -54,6 +57,7 @@ from telegram.telegram_engine import TelegramEngine
 from reports.report_engine import ReportEngine
 from dashboard.dashboard import Dashboard
 from utils.logger import get_logger
+from utils.training_progress import TrainingProgress
 
 
 class ForexBot:
@@ -105,6 +109,8 @@ class ForexBot:
         self.report_engine = None
 
         self.dashboard = Dashboard()
+        self._dashboard_refreshed = False
+        self._last_dashboard_display = datetime.now()
         self._symbols = config.trading["pairs"]
         self._timeframes = [self._tf_to_minutes(tf) for tf in config.trading["timeframes"]]
 
@@ -148,6 +154,13 @@ class ForexBot:
                 "profit": 0,
                 "leverage": config.account["leverage"],
             }
+
+        try:
+            synced = self.trade_logger.sync_from_mt5(self.data_engine.connector)
+            if synced > 0:
+                self.logger.info(f"Trade history synced: +{synced} trades from MT5")
+        except Exception as e:
+            self.logger.warning(f"MT5 trade history sync skipped: {e}")
 
         self.logger.info("Initializing ML Engine...")
         all_ensembles = {}
@@ -197,12 +210,13 @@ class ForexBot:
                         continue
                     self.logger.info(f"  {tf_label}: {len(df)} rows — preparing features...")
                     try:
-                        X, y, features = self.model_trainer.prepare_training_data(df)
+                        X, y, features, df_clean = self.model_trainer.prepare_training_data(df)
                     except Exception as e:
                         self.logger.warning(f"  {tf_label}: feature prep failed — {e}")
                         continue
+                    recency = ModelTrainer.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
                     self.logger.info(f"  {tf_label}: {len(X)} samples — training models...")
-                    results = self.model_trainer.train_all_models(X, y, feature_cols=features)
+                    results = self.model_trainer.train_all_models(X, y, feature_cols=features, recency_weights=recency)
                     if self.model_trainer.get_ensemble().get_num_models() > 0:
                         version = self.model_manager.save_ensemble(
                             self.model_trainer.get_ensemble(), timeframe=tf
@@ -333,6 +347,13 @@ class ForexBot:
                     last_report_check = now
 
                 self._update_dashboard()
+                if not self._dashboard_refreshed and self._last_analysis:
+                    self._dashboard_refreshed = True
+                    self._last_dashboard_display = now
+                    self.dashboard.display()
+                elif (now - self._last_dashboard_display).total_seconds() >= 60:
+                    self._last_dashboard_display = now
+                    self.dashboard.display()
 
                 if (now - last_data_refresh).total_seconds() >= 1800:
                     self.logger.info("Periodic data refresh: downloading latest candles...")
@@ -360,6 +381,43 @@ class ForexBot:
                 })
                 await asyncio.sleep(30)
 
+    def _align_multi_tf(self, symbol: str, count_m5: int = 500, count_context: int = 200):
+        """Fetch M5 + context TFs and align to M5 timestamps."""
+        import pandas as pd
+        import numpy as np
+
+        tfs = {"M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240}
+        data = {}
+        for label, tf in tfs.items():
+            cnt = count_m5 if tf == 5 else count_context
+            df = self.data_engine.get_rates(symbol, tf, count=cnt)
+            if df.empty:
+                self.logger.warning(f"  MTF align: no data for {symbol} {label}")
+                return None
+            data[tf] = df.copy()
+
+        m5 = data[5].sort_values("time").reset_index(drop=True)
+        m5["_time"] = pd.to_datetime(m5["time"])
+
+        for ctx_tf in [15, 30, 60, 240]:
+            ctx = data[ctx_tf].sort_values("time").reset_index(drop=True)
+            ctx["_time"] = pd.to_datetime(ctx["time"])
+            # forward-fill higher TF values into M5
+            ctx_cols = {}
+            for c in ["open", "high", "low", "close", "volume", "spread"]:
+                if c in ctx.columns:
+                    ctx_cols[f"{c}_tf{ctx_tf}"] = c
+            if not ctx_cols:
+                continue
+            ctx_idx = ctx[["_time"] + list(ctx_cols.values())].copy()
+            ctx_idx.columns = ["_time"] + list(ctx_cols.keys())
+            m5 = pd.merge_asof(m5.sort_values("_time"), ctx_idx.sort_values("_time"),
+                               on="_time", direction="backward", suffixes=("", f"_{ctx_tf}_dup"))
+
+        m5.drop(columns=["_time"], inplace=True)
+        m5.ffill(inplace=True)
+        return m5
+
     async def _process_symbol(self, symbol: str):
         try:
             perf_data = None
@@ -375,27 +433,45 @@ class ForexBot:
                 {tf: self.data_engine.get_rates(symbol, tf, count=50) for tf in self._timeframes},
                 performance_data=perf_data,
             )
-            trend_tf = selected_tfs.get("trend", Timeframe.M30)
-            entry_tf = selected_tfs.get("entry", Timeframe.M15)
 
-            df_trend = self.data_engine.get_rates(symbol, trend_tf, count=200)
-            df_entry = self.data_engine.get_rates(symbol, entry_tf, count=100)
-
-            if df_entry.empty or df_trend.empty:
+            # ── Multi-TF: M5 entry + context from M15/M30/H1/H4 ──
+            entry_tf = Timeframe.M5
+            aligned = self._align_multi_tf(symbol, count_m5=500, count_context=200)
+            if aligned is None or aligned.empty:
                 return
 
-            df_trend_feat = self.feature_pipeline.compute_all(df_trend)
-            df_entry_feat = self.feature_pipeline.compute_all(df_entry)
+            df_aligned_feat = self.feature_pipeline.compute_all(aligned)
+            if df_aligned_feat.empty or len(df_aligned_feat) < 50:
+                return
 
-            trend_result = self.trend_analyzer.analyze_trend(df_trend_feat)
-            vol_result = self.vol_analyzer.analyze_volatility(df_entry_feat)
-            momentum_result = self.momentum_analyzer.analyze_momentum(df_entry_feat)
-            regime_result = self.regime_detector.detect_regime(
-                trend_result, vol_result, momentum_result, df_entry_feat
+            trend_result = self.trend_analyzer.analyze_trend(df_aligned_feat)
+            self.logger.debug(
+                f"Trend [{symbol}] dir={trend_result.get('direction','?')} "
+                f"score={trend_result.get('score',0):+.1f} "
+                f"strength={trend_result.get('strength',0):.2f} "
+                f"ema={trend_result.get('ema_alignment',{}).get('direction',0)} "
+                f"slope={trend_result.get('slope_score',{}).get('direction',0)} "
+                f"pos={trend_result.get('price_position',{}).get('direction',0):+.2f} "
+                f"adx={trend_result.get('adx_score',{}).get('direction',0)} "
+                f"div={trend_result.get('divergence',{}).get('direction',0)}"
             )
 
-            sr = self.feature_pipeline.support_resistance.detect_levels(df_entry_feat)
-            feature_summary = self.feature_pipeline.compute_features_summary(df_entry_feat)
+            vol_result = self.vol_analyzer.analyze_volatility(df_aligned_feat)
+            momentum_result = self.momentum_analyzer.analyze_momentum(df_aligned_feat)
+            regime_result = self.regime_detector.detect_regime(
+                trend_result, vol_result, momentum_result, df_aligned_feat
+            )
+
+            sr = self.feature_pipeline.support_resistance.detect_levels(df_aligned_feat)
+            feature_summary = self.feature_pipeline.compute_features_summary(df_aligned_feat)
+
+            # Extract multi-TF trends from the last row of aligned data
+            last_row = df_aligned_feat.iloc[-1]
+            multi_tf_trends = {}
+            for col in ["trend240", "trend60", "trend30", "trend15"]:
+                if col in df_aligned_feat.columns:
+                    val = last_row.get(col)
+                    multi_tf_trends[col] = int(val) if pd.notna(val) else 0
 
             current_price = self.data_engine.get_current_price(symbol)
             price = current_price.get("bid", 0) if current_price else 0
@@ -415,9 +491,12 @@ class ForexBot:
                 feature_summary.get("indicators", {})
             )
 
+            multi_tf_trends_log = {k: multi_tf_trends.get(k, 0) for k in ["trend240", "trend60", "trend30", "trend15"]}
+            self.logger.debug(f"MTF [{symbol}] trends={multi_tf_trends_log}")
+
             decision = self.decision_engine.make_decision(
                 symbol=symbol,
-                df_entry={entry_tf: df_entry_feat},
+                df_entry={entry_tf: df_aligned_feat},
                 trend_result=trend_result,
                 vol_result=vol_result,
                 momentum_result=momentum_result,
@@ -430,6 +509,7 @@ class ForexBot:
                 llm_analysis=llm_analysis,
                 spread=spread,
                 timeframe=entry_tf,
+                multi_tf_trends=multi_tf_trends,
             )
 
             self.decision_logger.log_decision(symbol, decision)
@@ -441,7 +521,20 @@ class ForexBot:
                 "regime": regime_result,
                 "decision": decision,
                 "timeframe": selected_tfs,
+                "feature_summary": feature_summary,
+                "sr": sr,
+                "multi_tf_trends": multi_tf_trends,
             }
+
+            ml_sig = decision.get("ml_signal", {})
+            self.logger.debug(
+                f"ML [{symbol}] sig={ml_sig.get('signal','?')} "
+                f"buy={ml_sig.get('buy_prob',0):.0%} sell={ml_sig.get('sell_prob',0):.0%} "
+                f"hold={ml_sig.get('hold_prob',0):.0%} conf={ml_sig.get('confidence',0):.0%} | "
+                f"Final: {decision.get('action','?')} "
+                f"(score={decision.get('market_score',0)} "
+                f"conf={decision.get('confidence',0):.0%})"
+            )
 
             is_trade_action = decision["action"] in (
                 TradeDirection.BUY.value, TradeDirection.SELL.value,
@@ -554,7 +647,10 @@ class ForexBot:
         model_ver = self.model_manager.get_latest_version() or "none"
         positions = self.position_manager.get_open_positions()
         trades = self.trade_logger.get_trade_count()
-        perf = self.performance_analyzer.analyze_trades(self.trade_logger.get_closed_trades())
+        perf = self.performance_analyzer.analyze_trades(
+            self.trade_logger.get_closed_trades(),
+            start_balance=self._account_info.get("balance", 0),
+        )
         acct_status = self.risk_manager.account_monitor.get_account_status(self._account_info)
 
         uptime = datetime.now() - self._start_time
@@ -648,9 +744,10 @@ class ForexBot:
                     continue
 
                 self.logger.info(f"TRAINING [{idx+1}/{len(tf_list)}] {tf_label} — preparing features ({len(df)} rows)...")
-                X, y, features = self.model_trainer.prepare_training_data(df)
+                X, y, features, df_clean = self.model_trainer.prepare_training_data(df)
+                recency = ModelTrainer.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
                 self.logger.info(f"TRAINING [{idx+1}/{len(tf_list)}] {tf_label} — training models ({len(X)} samples)...")
-                results = self.model_trainer.train_all_models(X, y, feature_cols=features)
+                results = self.model_trainer.train_all_models(X, y, feature_cols=features, recency_weights=recency)
                 if self.model_trainer.get_ensemble().get_num_models() > 0:
                     version = self.model_manager.save_ensemble(
                         self.model_trainer.get_ensemble(), timeframe=tf
@@ -780,26 +877,6 @@ class ForexBot:
                 "lightgbm": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "reg_alpha": 0.5, "reg_lambda": 2.0},
             }
 
-    def _retry_model_params(self, attempt: int) -> tuple:
-        if attempt == 1:
-            return 2.0, {
-                "xgboost": {"n_estimators": 300, "max_depth": 8, "learning_rate": 0.03},
-                "random_forest": {"n_estimators": 300, "max_depth": 10},
-                "lightgbm": {"n_estimators": 300, "max_depth": 8, "learning_rate": 0.03},
-            }
-        elif attempt == 2:
-            return 4.0, {
-                "xgboost": {"n_estimators": 400, "max_depth": 10, "learning_rate": 0.02, "subsample": 0.7, "colsample_bytree": 0.7},
-                "random_forest": {"n_estimators": 400, "max_depth": 12, "min_samples_split": 5},
-                "lightgbm": {"n_estimators": 400, "max_depth": 10, "learning_rate": 0.02, "subsample": 0.7, "colsample_bytree": 0.7},
-            }
-        else:
-            return 6.0, {
-                "xgboost": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "gamma": 0.5, "reg_alpha": 0.5, "reg_lambda": 2.0},
-                "random_forest": {"n_estimators": 200, "max_depth": 6, "min_samples_split": 20},
-                "lightgbm": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "reg_alpha": 0.5, "reg_lambda": 2.0},
-            }
-
     async def _perform_retrain(self, data_override: Optional[Dict] = None):
         self.logger.info("Starting auto retrain...")
         symbol = self._symbols[0]
@@ -818,203 +895,231 @@ class ForexBot:
         accepted_list = []
 
         _train_times = []
-        for idx, tf in enumerate(trained_timeframes):
-            tf_label = Timeframe.LABELS.get(tf, tf)
-            _step_start = time.monotonic()
-            try:
-                if data_override and tf in data_override:
-                    df = data_override[tf]
-                    self.logger.info(f"  {tf_label}: using pre-loaded data ({len(df)} candles)")
-                else:
-                    df = self.data_engine.get_historical_data(symbol, tf, years=1)
-                if df.empty:
-                    self.logger.warning(f"  {tf_label}: no data, skipping")
-                    continue
-                self.logger.info(f"  {tf_label}: {len(df)} candles loaded — preparing features...")
-
-                old_version = self.model_manager.get_latest_version(tf)
-                accepted = False
-                best_oos = None
-                best_version = None
-                attempt_versions = []
-
-                for attempt in range(1, max_retries + 1):
-                    weight_mult, model_params = self._retry_model_params(attempt)
-                    self.logger.info(f"RETRAIN [{idx+1}/{len(trained_timeframes)}] {tf_label} — attempt {attempt}/{max_retries} (w={weight_mult})...")
-
-                    self.auto_retrain.model_trainer.ensemble = VotingEnsemble()
-                    result = self.auto_retrain.retrain(
-                        df, timeframe=tf,
-                        sample_weight_multiplier=weight_mult,
-                        model_params=model_params,
-                    )
-                    if not result.get("success"):
-                        self.logger.warning(f"  {tf_label} attempt {attempt}: training failed — {result.get('error', 'unknown')}")
-                        continue
-
-                    attempt_version = result["version"]
-                    attempt_versions.append(attempt_version)
-                    ensemble = self.model_manager.load_ensemble(attempt_version)
-
-                    oos_result = self.oos_validator.validate(
-                        df=df, ensemble=ensemble, trainer=self.model_trainer,
-                        timeframe_label=tf_label, oos_split=0.2,
-                    )
-                    self.model_manager.save_oos_result(attempt_version, oos_result)
-
-                    if oos_result.get("success"):
-                        self.logger.info(
-                            f"  {tf_label} attempt {attempt}/{max_retries} OOS: WR={oos_result['win_rate']:.1f}% "
-                            f"PF={oos_result['profit_factor']:.2f} Sharpe={oos_result.get('sharpe_ratio',0):.2f} "
-                            f"Grade={oos_result['grade']} Trades={oos_result['total_trades']} "
-                            f"Passed={oos_result.get('passed',False)}"
-                        )
+        with TrainingProgress() as progress:
+            for idx, tf in enumerate(trained_timeframes):
+                tf_label = Timeframe.LABELS.get(tf, tf)
+                progress.begin_tf(str(tf_label), attempt=1, max_attempts=max_retries)
+                _step_start = time.monotonic()
+                try:
+                    if data_override and tf in data_override:
+                        df = data_override[tf]
+                        self.logger.info(f"  {tf_label}: using pre-loaded data ({len(df)} candles)")
                     else:
+                        df = self.data_engine.get_historical_data(symbol, tf, years=1)
+                    if df.empty:
+                        self.logger.warning(f"  {tf_label}: no data, skipping")
+                        continue
+                    self.logger.info(f"  {tf_label}: {len(df)} candles loaded — preparing features...")
+
+                    old_version = self.model_manager.get_latest_version(tf)
+                    accepted = False
+                    best_oos = None
+                    best_version = None
+                    attempt_versions = []
+
+                    for attempt in range(1, max_retries + 1):
+                        weight_mult, model_params = self._retry_model_params(attempt)
+                        self.logger.info(f"RETRAIN [{idx+1}/{len(trained_timeframes)}] {tf_label} — attempt {attempt}/{max_retries} (w={weight_mult})...")
+
+                        self.auto_retrain.model_trainer.ensemble = VotingEnsemble()
+                        result = self.auto_retrain.retrain(
+                            df, timeframe=tf,
+                            sample_weight_multiplier=weight_mult,
+                            model_params=model_params,
+                            progress=progress,
+                            tf_label=tf_label,
+                        )
+                        if not result.get("success"):
+                            self.logger.warning(f"  {tf_label} attempt {attempt}: training failed — {result.get('error', 'unknown')}")
+                            continue
+
+                        attempt_version = result["version"]
+                        attempt_versions.append(attempt_version)
+
+                        models_data = result.get("models", {}) or {}
+                        perf_data = {"accuracy": {}}
+                        for m_name in ["xgboost", "random_forest", "lightgbm"]:
+                            m_data = models_data.get(m_name, {}) or {}
+                            perf_data["accuracy"][m_name] = m_data.get("train_accuracy", 0) or 0
+                            perf_data["accuracy"][f"{m_name}_val"] = m_data.get("val_accuracy", 0) or 0
+                        self.model_manager.save_performance(attempt_version, perf_data)
+
+                        ensemble = self.model_manager.load_ensemble(attempt_version)
+
+                        progress.begin_oos()
+                        oos_result = self.oos_validator.validate(
+                            df=df, ensemble=ensemble, trainer=self.model_trainer,
+                            timeframe_label=tf_label, oos_split=0.2,
+                        )
+                        progress.end_oos()
+                        self.model_manager.save_oos_result(attempt_version, oos_result)
+
+                        if oos_result.get("success"):
+                            self.logger.info(
+                                f"  {tf_label} attempt {attempt}/{max_retries} OOS: WR={oos_result['win_rate']:.1f}% "
+                                f"PF={oos_result['profit_factor']:.2f} Sharpe={oos_result.get('sharpe_ratio',0):.2f} "
+                                f"Grade={oos_result['grade']} Trades={oos_result['total_trades']} "
+                                f"Passed={oos_result.get('passed',False)}"
+                            )
+                        else:
+                            self.logger.info(
+                                f"  {tf_label} attempt {attempt}/{max_retries} OOS: FAILED "
+                                f"({oos_result.get('reason', 'unknown')}) "
+                                f"acc={oos_result.get('accuracy',0):.1f}%"
+                            )
+
+                        if best_oos is None or (
+                            oos_result.get("success", False) and
+                            oos_result.get("profit_factor", 0) > best_oos.get("profit_factor", 0)
+                        ):
+                            best_oos = oos_result
+                            best_version = attempt_version
+                            self.logger.info(f"  {tf_label} attempt {attempt}: best so far (PF={oos_result.get('profit_factor',0):.2f})")
+
+                        oos_success = oos_result.get("success", False)
+                        oos_acc = oos_result.get("accuracy", 0)
+                        fallback_eligible = not oos_success and oos_acc >= 50
                         self.logger.info(
-                            f"  {tf_label} attempt {attempt}/{max_retries} OOS: FAILED "
-                            f"({oos_result.get('reason', 'unknown')}) "
-                            f"acc={oos_result.get('accuracy',0):.1f}%"
+                            f"  {tf_label} attempt {attempt}: oos_success={oos_success} "
+                            f"acc={oos_acc:.1f}% → "
+                            f"{'PASS' if oos_success else 'FALLBACK_ELIGIBLE' if fallback_eligible else 'REJECT'}"
                         )
 
-                    if best_oos is None or (
-                        oos_result.get("success", False) and
-                        oos_result.get("profit_factor", 0) > best_oos.get("profit_factor", 0)
-                    ):
-                        best_oos = oos_result
-                        best_version = attempt_version
-                        self.logger.info(f"  {tf_label} attempt {attempt}: best so far (PF={oos_result.get('profit_factor',0):.2f})")
-
-                    oos_success = oos_result.get("success", False)
-                    oos_acc = oos_result.get("accuracy", 0)
-                    fallback_eligible = not oos_success and oos_acc >= 50
-                    self.logger.info(
-                        f"  {tf_label} attempt {attempt}: oos_success={oos_success} "
-                        f"acc={oos_acc:.1f}% → "
-                        f"{'PASS' if oos_success else 'FALLBACK_ELIGIBLE' if fallback_eligible else 'REJECT'}"
-                    )
-
-                    if oos_success or fallback_eligible:
-                        effective_pass = oos_result.get("passed", False) if oos_result.get("success") else True
-                        if effective_pass:
-                            if old_version:
-                                old_oos = self.model_manager.get_oos_result(old_version)
-                                if old_oos.get("success"):
-                                    new_score = oos_result.get("win_rate", 0) * oos_result.get("profit_factor", 0)
-                                    old_score = old_oos.get("win_rate", 0) * old_oos.get("profit_factor", 0)
-                                    if new_score >= old_score * 0.5:
+                        if oos_success or fallback_eligible:
+                            effective_pass = oos_result.get("passed", False) if oos_result.get("success") else True
+                            if effective_pass:
+                                if old_version:
+                                    old_oos = self.model_manager.get_oos_result(old_version)
+                                    if old_oos.get("success"):
+                                        new_score = oos_result.get("win_rate", 0) * oos_result.get("profit_factor", 0)
+                                        old_score = old_oos.get("win_rate", 0) * old_oos.get("profit_factor", 0)
+                                        if new_score >= old_score * 0.5:
+                                            accepted = True
+                                            self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (score={new_score:.2f} >= old*0.5={old_score*0.5:.2f})")
+                                    else:
                                         accepted = True
-                                        self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (score={new_score:.2f} >= old*0.5={old_score*0.5:.2f})")
+                                        self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (no old OOS)")
                                 else:
                                     accepted = True
-                                    self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (no old OOS)")
+                                    self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (first ever)")
                             else:
-                                accepted = True
-                                self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (first ever)")
+                                self.logger.info(f"  {tf_label} attempt {attempt}: not passed (PF={oos_result.get('profit_factor',0):.2f})")
+
+                        if accepted:
+                            progress.end_tf()
+                            ensembles[tf] = self.model_manager.load_ensemble(attempt_version)
+                            self.model_manager.increment_retrain_count(tf)
+                            accepted_list.append(tf_label)
+                            rejected_versions.extend(v for v in attempt_versions if v != attempt_version)
+                            await self.telegram.send_event(TelegramEvent.MODEL_RETRAINED, {
+                                "version": attempt_version,
+                                "timeframe": tf_label,
+                                "models": ensemble.get_num_models(),
+                                "samples": len(result.get("X", [])),
+                                "accuracy": result.get("models", {}).get("xgboost", {}).get("train_accuracy", 0),
+                                "oos_grade": oos_result.get("grade", "N/A"),
+                                "oos_win_rate": oos_result.get("win_rate", 0),
+                            })
+                            break
                         else:
-                            self.logger.info(f"  {tf_label} attempt {attempt}: not passed (PF={oos_result.get('profit_factor',0):.2f})")
+                            self.logger.info(f"  {tf_label} attempt {attempt}: not accepted, retrying...")
 
-                    if accepted:
-                        ensembles[tf] = self.model_manager.load_ensemble(attempt_version)
-                        self.model_manager.increment_retrain_count(tf)
-                        accepted_list.append(tf_label)
-                        rejected_versions.extend(v for v in attempt_versions if v != attempt_version)
-                        await self.telegram.send_event(TelegramEvent.MODEL_RETRAINED, {
-                            "version": attempt_version,
-                            "timeframe": tf_label,
-                            "models": ensemble.get_num_models(),
-                            "samples": len(result.get("X", [])),
-                            "accuracy": result.get("models", {}).get("xgboost", {}).get("train_accuracy", 0),
-                            "oos_grade": oos_result.get("grade", "N/A"),
-                            "oos_win_rate": oos_result.get("win_rate", 0),
-                        })
-                        break
-                    else:
-                        self.logger.info(f"  {tf_label} attempt {attempt}: not accepted, retrying...")
+                    _elapsed = time.monotonic() - _step_start
+                    _train_times.append(_elapsed)
+                    _avg = sum(_train_times) / len(_train_times)
+                    _remaining = _avg * (len(trained_timeframes) - idx - 1)
 
-                _elapsed = time.monotonic() - _step_start
-                _train_times.append(_elapsed)
-                _avg = sum(_train_times) / len(_train_times)
-                _remaining = _avg * (len(trained_timeframes) - idx - 1)
+                    if not accepted:
+                        use_version = old_version or best_version
+                        if use_version:
+                            try:
+                                ensembles[tf] = self.model_manager.load_ensemble(use_version)
+                            except Exception:
+                                pass
+                        rejected_versions.extend(attempt_versions)
+                        self.logger.warning(
+                            f"  {tf_label}: all {max_retries} attempts failed, keeping {use_version} "
+                            f"(best OOS: Grade={best_oos.get('grade','N/A') if best_oos else 'N/A'} "
+                            f"WR={best_oos.get('win_rate',0) if best_oos else 0:.1f}% "
+                            f"PF={best_oos.get('profit_factor',0) if best_oos else 0:.2f})"
+                        )
 
-                if not accepted:
-                    use_version = old_version or best_version
-                    if use_version:
-                        try:
-                            ensembles[tf] = self.model_manager.load_ensemble(use_version)
-                        except Exception:
-                            pass
-                    rejected_versions.extend(attempt_versions)
-                    self.logger.warning(
-                        f"  {tf_label}: all {max_retries} attempts failed, keeping {use_version} "
-                        f"(best OOS: Grade={best_oos.get('grade','N/A') if best_oos else 'N/A'} "
-                        f"WR={best_oos.get('win_rate',0) if best_oos else 0:.1f}% "
-                        f"PF={best_oos.get('profit_factor',0) if best_oos else 0:.2f})"
-                    )
+                    self.logger.info(f"RETRAIN [{idx+1}/{len(trained_timeframes)}] {tf_label} — {'ACCEPTED' if accepted else 'KEPT OLD'} in {_elapsed:.1f}s | ETA: {_remaining:.0f}s ({_remaining/60:.1f}m)")
 
-                self.logger.info(f"RETRAIN [{idx+1}/{len(trained_timeframes)}] {tf_label} — {'ACCEPTED' if accepted else 'KEPT OLD'} in {_elapsed:.1f}s | ETA: {_remaining:.0f}s ({_remaining/60:.1f}m)")
+                except Exception as e:
+                    self.logger.warning(f"Retrain failed for {Timeframe.LABELS.get(tf, tf)}: {e}")
+                    try:
+                        ensembles[tf] = self.model_manager.load_latest_for_timeframe(tf)
+                    except Exception:
+                        pass
+                    continue
 
-            except Exception as e:
-                self.logger.warning(f"Retrain failed for {Timeframe.LABELS.get(tf, tf)}: {e}")
-                try:
-                    ensembles[tf] = self.model_manager.load_latest_for_timeframe(tf)
-                except Exception:
-                    pass
-                continue
+            keep_versions = set()
+            for tf_ in ensembles:
+                v = self.model_manager.get_latest_version(tf_)
+                if v:
+                    keep_versions.add(v)
+            for v in set(rejected_versions):
+                if v and v not in keep_versions and v != "none":
+                    try:
+                        self.model_manager.delete_version(v)
+                    except Exception:
+                        pass
 
-        keep_versions = set()
-        for tf_ in ensembles:
-            v = self.model_manager.get_latest_version(tf_)
-            if v:
-                keep_versions.add(v)
-        for v in set(rejected_versions):
-            if v and v not in keep_versions and v != "none":
-                try:
-                    self.model_manager.delete_version(v)
-                except Exception:
-                    pass
-
-        if ensembles:
-            self.ml_predictor = MLPredictor(ensembles)
-            self.decision_engine = DecisionEngine(
-                ml_predictor=self.ml_predictor,
-                market_scorer=self.market_scorer,
-                trade_memory=self.trade_memory,
-            )
-            self._update_dashboard()
-
-            if accepted_list:
-                self.logger.info(f"Models accepted: {', '.join(accepted_list)}")
-
-            new_skill = self.model_manager.get_skill_level()
-            new_retrains = self.model_manager.get_total_retrains()
-            if new_skill != old_skill:
-                summary = self.model_manager.get_models_summary()
-                model_lines = "\n".join(
-                    f"  {n}: v{m['version']} | {m['retrains']}x | {m['skill']} (score:{m.get('skill_score',0)})"
-                    for n, m in sorted(summary.items()) if not n.startswith("_")
+            if ensembles:
+                self.ml_predictor = MLPredictor(ensembles)
+                self.decision_engine = DecisionEngine(
+                    ml_predictor=self.ml_predictor,
+                    market_scorer=self.market_scorer,
+                    trade_memory=self.trade_memory,
                 )
-                await self.telegram.send_event(TelegramEvent.SKILL_UP, {
-                    "old_skill": old_skill,
-                    "new_skill": new_skill,
-                    "total_retrains": new_retrains,
-                    "active_models": len(ensembles),
-                    "models_detail": model_lines,
-                })
+                self._update_dashboard()
+
+                if accepted_list:
+                    self.logger.info(f"Models accepted: {', '.join(accepted_list)}")
+
+                new_skill = self.model_manager.get_skill_level()
+                new_retrains = self.model_manager.get_total_retrains()
+                if new_skill != old_skill:
+                    summary = self.model_manager.get_models_summary()
+                    model_lines = "\n".join(
+                        f"  {n}: v{m['version']} | {m['retrains']}x | {m['skill']} (score:{m.get('skill_score',0)})"
+                        for n, m in sorted(summary.items()) if not n.startswith("_")
+                    )
+                    await self.telegram.send_event(TelegramEvent.SKILL_UP, {
+                        "old_skill": old_skill,
+                        "new_skill": new_skill,
+                        "total_retrains": new_retrains,
+                        "active_models": len(ensembles),
+                        "models_detail": model_lines,
+                    })
 
     def _update_dashboard(self):
         trades = self.trade_logger.get_closed_trades()
-        perf = self.performance_analyzer.analyze_trades(trades)
+        perf = self.performance_analyzer.analyze_trades(
+            trades,
+            start_balance=self._account_info.get("balance", 0),
+        )
         acct_status = self.risk_manager.account_monitor.get_account_status(self._account_info)
 
         drift_summary = self.drift_detector.get_drift_summary()
-        retrain_needed, _ = self.auto_retrain.check_retrain_needed() if self.auto_retrain else (False, "")
+        retrain_needed, retrain_reason = self.auto_retrain.check_retrain_needed() if self.auto_retrain else (False, "")
+        closed_trades = self.trade_logger.get_closed_trades()
+        if closed_trades:
+            trades_by_pair: Dict[str, List] = {}
+            for t in closed_trades:
+                sym = t.get("symbol", "UNKNOWN")
+                trades_by_pair.setdefault(sym, []).append(t)
+            self.skill_scorer.compute_per_pair(trades_by_pair)
         pair_skills = self.skill_scorer.get_pair_skills()
         best_pair = self.skill_scorer.get_best_pair(pair_skills) or "N/A"
         worst_pair = self.skill_scorer.get_worst_pair(pair_skills) or "N/A"
 
         mistake_report = self.mistake_analyzer.analyze_losses(self.trade_logger.get_closed_trades())
 
+        has_analysis = len(self._last_analysis) > 0
         state = {
+            "analysis_ready": has_analysis,
             "balance": self._account_info.get("balance", 0),
             "equity": self._account_info.get("equity", 0),
             "margin": self._account_info.get("margin", 0),
@@ -1029,6 +1134,7 @@ class ForexBot:
             "learning_status": "active" if config.learning["enabled"] else "disabled",
             "model_version": self.model_manager.get_latest_version() or "none",
             "retrain_count": self.model_manager.get_total_retrains(),
+            "last_retrain": self.model_manager.get_last_retrain_time() or "never",
             "skill_level": self.model_manager.get_skill_level(),
             "skill_score": self.model_manager.get_skill_score(),
             "models_summary": self.model_manager.get_models_summary(),
@@ -1036,6 +1142,7 @@ class ForexBot:
             "drift_detected": drift_summary.get("drift_detected", False),
             "drift_score": drift_summary.get("last_drift", {}).get("score", 0) if drift_summary.get("last_drift") else 0,
             "retrain_needed": retrain_needed,
+            "retrain_reason": retrain_reason,
             "best_pair": best_pair,
             "worst_pair": worst_pair,
             "pair_skills": pair_skills,
@@ -1044,20 +1151,76 @@ class ForexBot:
 
         for symbol, analysis in self._last_analysis.items():
             state["symbol"] = symbol
-            state["trend"] = analysis.get("trend", {}).get("direction", "N/A")
-            state["regime"] = analysis.get("regime", {}).get("regime", "N/A")
-            state["market_score"] = analysis.get("decision", {}).get("market_score", 0)
-            state["confidence"] = analysis.get("decision", {}).get("confidence", 0)
-            state["current_action"] = analysis.get("decision", {}).get("action", "HOLD")
+            trend = analysis.get("trend", {})
+            state["trend"] = trend.get("direction", "N/A")
+            state["trend_strength"] = trend.get("strength", 0)
+            state["trend_score"] = trend.get("score", 0)
+            diverg = trend.get("divergence", {})
+            state["divergence_type"] = diverg.get("type") if diverg.get("direction") else None
+
+            vol = analysis.get("volatility", {})
+            state["vol_level"] = vol.get("level", "N/A")
+            state["vol_score"] = vol.get("score", 0)
+            state["atr"] = vol.get("atr", 0)
+            state["vol_expanding"] = vol.get("expanding", False)
+
+            mom = analysis.get("momentum", {})
+            state["momentum_score"] = mom.get("score", 0)
+            state["momentum_strength"] = mom.get("strength", "N/A")
+
+            regime_result = analysis.get("regime", {})
+            state["regime"] = regime_result.get("regime", "N/A")
+            state["regime_confidence"] = regime_result.get("confidence", 0)
+
+            dec = analysis.get("decision", {})
+            state["market_score"] = dec.get("market_score", 0)
+            state["confidence"] = dec.get("confidence", 0)
+            state["current_action"] = dec.get("action", "HOLD")
+            state["ml_signal"] = dec.get("ml_signal")
+            state["decision_reasons"] = dec.get("reasons", [])
+            state["no_trade_reasons"] = dec.get("no_trade_reasons", [])
+            state["no_trade"] = dec.get("no_trade", False)
+            state["entry_price"] = dec.get("entry_price") or 0
+            state["stop_loss"] = dec.get("stop_loss") or 0
+            state["take_profit"] = dec.get("take_profit") or 0
+
             tf_info = analysis.get("timeframe", {})
             dec_tf = analysis.get("decision", {}).get("timeframe")
             if dec_tf:
                 state["selected_timeframe"] = Timeframe.LABELS.get(dec_tf, "N/A")
             else:
                 state["selected_timeframe"] = Timeframe.LABELS.get(tf_info.get("entry", 0), "N/A")
-            state["strategy"] = self.regime_detector.get_strategy_for_regime(
-                analysis.get("regime", {}).get("regime", "SIDEWAYS")
-            ).get("action", "HOLD")
+            raw_tf_scores = tf_info.get("scores", {})
+            state["tf_scores"] = {
+                Timeframe.LABELS.get(k, str(k)): v
+                for k, v in raw_tf_scores.items()
+            }
+
+            strategy_full = self.regime_detector.get_strategy_for_regime(
+                regime_result.get("regime", "SIDEWAYS")
+            )
+            state["strategy"] = strategy_full.get("action", "HOLD")
+            state["aggressiveness"] = strategy_full.get("aggressiveness", "N/A")
+            state["trailing_stop"] = strategy_full.get("trailing_stop", False)
+
+            fs = analysis.get("feature_summary", {})
+            ind = fs.get("indicators", {})
+            state["rsi"] = ind.get("rsi", 50)
+            state["macd"] = ind.get("macd", 0)
+            state["macd_signal"] = ind.get("macd_signal", 0)
+            state["adx"] = ind.get("adx", 0)
+            state["ema_20"] = ind.get("ema_20", 0)
+            state["ema_50"] = ind.get("ema_50", 0)
+            state["ema_200"] = ind.get("ema_200", 0)
+
+            ms = fs.get("market_structure", {})
+            state["market_structure"] = ms.get("current", "N/A")
+            state["has_bos"] = ms.get("has_bos", False)
+            state["has_choch"] = ms.get("has_choch", False)
+
+            state["price_action"] = fs.get("price_action", {}).get("current", "N/A")
+            state["candle_pattern"] = fs.get("candle_pattern", {}).get("current", "N/A")
+            state["candle_signal"] = str(fs.get("candle_pattern", {}).get("signal", "N/A"))
 
             tick = self.data_engine.get_current_price(symbol)
             if tick:
@@ -1070,7 +1233,10 @@ class ForexBot:
         self.running = False
 
         trades = self.trade_logger.get_closed_trades()
-        perf = self.performance_analyzer.analyze_trades(trades)
+        perf = self.performance_analyzer.analyze_trades(
+            trades,
+            start_balance=self._account_info.get("balance", 0),
+        )
         positions = self.position_manager.get_open_positions()
 
         tf_lines = []
@@ -1493,7 +1659,7 @@ async def main():
     bot = ForexBot()
     try:
         await bot.initialize()
-        print(bot.dashboard.get_display_text())
+        bot.dashboard.display()
 
         cmd = args.command
         if cmd == "train":

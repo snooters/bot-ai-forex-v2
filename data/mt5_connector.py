@@ -100,6 +100,8 @@ class MT5Connector:
             if sec % 5 == 0 or sec == 0:
                 self.logger.info(f"Waiting for terminal data feed... ({sec+1}s/{max_wait}s)")
             _time.sleep(1)
+        if config.account["trading_mode"] == "live":
+            raise MT5ConnectionError(f"LIVE mode: MT5 terminal not ready after {max_wait}s")
         self.logger.warning(f"MT5 terminal data feed not ready after {max_wait}s, will use simulation fallback")
 
     def disconnect(self):
@@ -123,7 +125,13 @@ class MT5Connector:
     def get_rates(
         self, symbol: str, timeframe: int, count: int = 100
     ) -> pd.DataFrame:
+        is_live = config.account["trading_mode"] == "live"
+
         if not self._mt5_available:
+            if is_live:
+                raise MT5ConnectionError(
+                    f"LIVE mode: MT5 not available — cannot fetch {symbol} tf={timeframe}"
+                )
             return self._simulate_rates(symbol, timeframe, count)
 
         self.ensure_connected()
@@ -138,6 +146,10 @@ class MT5Connector:
                 if rates is not None and len(rates) > 0:
                     self.logger.info(f"MT5 data recovered after symbol_select for {symbol} tf={timeframe}")
                     return self._rates_to_df(symbol, timeframe, rates)
+                if is_live:
+                    raise MT5DataError(
+                        f"LIVE mode: MT5 terminal not ready for {symbol} tf={timeframe}"
+                    )
                 self.logger.warning(f"MT5 terminal not ready for {symbol} tf={timeframe}, using simulation")
                 return self._simulate_rates(symbol, timeframe, count)
             raise MT5DataError(f"Failed to get rates for {symbol} tf={timeframe}: {error_str}")
@@ -218,6 +230,10 @@ class MT5Connector:
         if not self._mt5_available:
             return []
         self.ensure_connected()
+        try:
+            self._mt5.refresh_rates()
+        except Exception:
+            pass
         if symbol:
             positions = self._mt5.positions_get(symbol=symbol)
         else:
@@ -320,6 +336,33 @@ class MT5Connector:
         if result is None or result.retcode != self._mt5.TRADE_RETCODE_DONE:
             return False
         return True
+
+    def get_history_deals(
+        self,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        magic: int = 2024001,
+    ) -> List[Dict]:
+        if not self._mt5_available or not self._connected:
+            return []
+        try:
+            from datetime import timedelta
+            if from_date is None:
+                from_date = datetime.now() - timedelta(days=365)
+            if to_date is None:
+                to_date = datetime.now() + timedelta(days=1)
+            deals = self._mt5.history_deals_get(from_date, to_date)
+            if deals is None:
+                return []
+            result = []
+            for d in deals:
+                deal = d._asdict() if hasattr(d, '_asdict') else {}
+                if deal.get("magic", 0) == magic:
+                    result.append(deal)
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get history deals: {e}")
+            return []
 
     def close_position(self, ticket: int, symbol: str, volume: float, position_type: str) -> bool:
         if not self._mt5_available:

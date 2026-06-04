@@ -50,13 +50,15 @@ class Config:
                 "max_risk_pct": self._get_float("MAX_RISK_PCT", 0.005),
                 "max_daily_loss_pct": self._get_float("MAX_DAILY_LOSS_PCT", 0.03),
                 "max_open_positions": self._get_int("MAX_OPEN_POSITIONS", 1),
-                "rr_ratio": self._get_float("RR_RATIO", 2.0),
+                "rr_ratio": self._get_float("RR_RATIO", 1.0),
                 "use_dynamic_sl": self._get_bool("USE_DYNAMIC_SL", True),
                 "use_dynamic_tp": self._get_bool("USE_DYNAMIC_TP", True),
                 "sl_pips": self._get_float("SL_PIPS", 30.0),
                 "tp_pips": self._get_float("TP_PIPS", 60.0),
                 "trailing_activate": self._get_float("TRAILING_ACTIVATE", 20.0),
                 "trailing_distance": self._get_float("TRAILING_DISTANCE", 10.0),
+                "trailing_atr_multiplier": self._get_float("TRAILING_ATR_MULTIPLIER", 1.5),
+                "max_hold_hours": self._get_int("MAX_HOLD_HOURS", 12),
                 "use_dynamic_risk": self._get_bool("USE_DYNAMIC_RISK", True),
             },
             "ai_filter": {
@@ -264,6 +266,24 @@ class Config:
     @property
     def diagnostic(self) -> dict:
         return self._config["diagnostic"]
+
+    def get_dynamic_min_confidence(self, balance: float) -> float:
+        if balance < 200:
+            return 0.65
+        elif balance < 500:
+            return 0.55
+        elif balance < 2000:
+            return 0.50
+        elif balance < 5000:
+            return 0.45
+        return 0.40
+
+    def get_dynamic_max_positions(self, balance: float) -> int:
+        if balance < 500:
+            return 1
+        elif balance < 2000:
+            return 2
+        return 3
 
     def to_dict(self) -> dict:
         return self._config

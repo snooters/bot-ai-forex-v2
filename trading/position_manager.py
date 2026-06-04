@@ -1,5 +1,6 @@
 from typing import Dict, Optional, List
 
+from core.config import config
 from core.constants import PositionAction
 from trading.execution_engine import ExecutionEngine
 from trading.exit_engine import ExitEngine
@@ -38,6 +39,9 @@ class PositionManager:
         regime_result: Dict,
         confidence: float,
         market_structure: Dict,
+        reversal_force_close: bool = False,
+        atr: float = 0,
+        balance: float = 0,
     ) -> List[Dict]:
         actions_taken = []
         positions = self.get_open_positions(symbol)
@@ -47,6 +51,48 @@ class PositionManager:
             if current_price is None:
                 continue
 
+            if reversal_force_close:
+                result = self.exit_engine.close_position(position)
+                actions_taken.append({
+                    "ticket": position["ticket"],
+                    "action": "FULL_CLOSE",
+                    "result": result,
+                })
+                continue
+
+            # ── Breakeven SL (Langkah 4): SL = entry + spread after 1 ATR move ──
+            if atr > 0:
+                entry = position.get("price_open", 0)
+                is_buy = position["type"] == "BUY"
+                price_move = (current_price - entry) if is_buy else (entry - current_price)
+                current_sl = position.get("sl")
+                pip_size = 0.0001
+                spread = self.data_engine.get_current_spread(symbol) or 10
+                be_buffer = spread * pip_size * 0.5  # half spread as buffer
+                be_price = entry + be_buffer if is_buy else entry - be_buffer
+
+                if price_move >= atr:
+                    if is_buy and (current_sl is None or current_sl < be_price):
+                        self.execution_engine.modify_position(position["ticket"], sl=be_price)
+                        self.logger.info(f"Breakeven SL set for ticket {position['ticket']} at {be_price:.5f}")
+                    elif not is_buy and (current_sl is None or current_sl > be_price):
+                        self.execution_engine.modify_position(position["ticket"], sl=be_price)
+                        self.logger.info(f"Breakeven SL set for ticket {position['ticket']} at {be_price:.5f}")
+
+                # ── Trailing stop for runner (Langkah 5, balance >= $500) ──
+                if balance >= 500 and price_move >= atr * 2.0 and position.get("comment", "") == "AI_FOREX_V2_RUN":
+                    trail_dist = atr * 1.5
+                    if is_buy:
+                        new_sl = current_price - trail_dist
+                        if new_sl > (current_sl or 0):
+                            self.execution_engine.modify_position(position["ticket"], sl=new_sl)
+                            self.logger.info(f"Runner trail: ticket {position['ticket']} SL → {new_sl:.5f}")
+                    else:
+                        new_sl = current_price + trail_dist
+                        if new_sl < (current_sl or float("inf")):
+                            self.execution_engine.modify_position(position["ticket"], sl=new_sl)
+                            self.logger.info(f"Runner trail: ticket {position['ticket']} SL → {new_sl:.5f}")
+
             action = self.exit_engine.evaluate_exit(
                 position=position,
                 current_price=current_price,
@@ -54,9 +100,10 @@ class PositionManager:
                 regime_result=regime_result,
                 confidence=confidence,
                 market_structure=market_structure,
+                atr=atr,
             )
 
-            result = self._execute_action(position, action, current_price)
+            result = self._execute_action(position, action, current_price, atr)
             actions_taken.append({
                 "ticket": position["ticket"],
                 "action": action.value,
@@ -66,18 +113,18 @@ class PositionManager:
         self.refresh_positions(symbol)
         return actions_taken
 
-    def _execute_action(self, position: Dict, action: PositionAction, current_price: float) -> bool:
+    def _execute_action(self, position: Dict, action: PositionAction, current_price: float, atr: float = 0) -> bool:
         if action == PositionAction.FULL_CLOSE:
             return self.exit_engine.close_position(position)
 
         elif action == PositionAction.TRAILING_STOP:
-            trailing_distance = current_price * 0.001
+            trailing_dist = atr * config.risk.get("trailing_atr_multiplier", 1.5) if atr > 0 else current_price * 0.001
             if position["type"] == "BUY":
-                new_sl = current_price - trailing_distance
+                new_sl = current_price - trailing_dist
                 if new_sl > (position.get("sl", 0) or 0):
                     return self.execution_engine.modify_position(position["ticket"], sl=new_sl)
             else:
-                new_sl = current_price + trailing_distance
+                new_sl = current_price + trailing_dist
                 if new_sl < (position.get("sl", float("inf")) or float("inf")):
                     return self.execution_engine.modify_position(position["ticket"], sl=new_sl)
             return False

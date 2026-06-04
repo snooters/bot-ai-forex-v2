@@ -78,8 +78,9 @@ def compute_sortino_ratio(returns: List[float], risk_free_rate: float = 0.02) ->
 def compute_max_drawdown(equity_curve: List[float]) -> Tuple[float, int]:
     if len(equity_curve) < 2:
         return 0.0, 0
-    arr = np.array(equity_curve)
+    arr = np.array(equity_curve, dtype=float)
     peak = np.maximum.accumulate(arr)
+    peak = np.where(peak == 0, 1, peak)
     dd = (arr - peak) / peak
     max_dd = dd.min()
     max_dd_idx = dd.argmin()

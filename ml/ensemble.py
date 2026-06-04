@@ -72,10 +72,10 @@ class VotingEnsemble:
         label_map = {0: "BUY", 1: "SELL", 2: "HOLD"}
         return {
             "signal": label_map.get(prediction, "HOLD"),
-            "confidence": confidence * 100,
-            "buy_prob": float(proba[0]) * 100,
-            "sell_prob": float(proba[1]) * 100,
-            "hold_prob": float(proba[2]) * 100,
+            "confidence": confidence,
+            "buy_prob": float(proba[0]),
+            "sell_prob": float(proba[1]),
+            "hold_prob": float(proba[2]),
         }
 
     @property

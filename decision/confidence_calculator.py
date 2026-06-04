@@ -57,7 +57,7 @@ class ConfidenceCalculator:
             combined += news_score * news_weight
 
         if llm_analysis:
-            llm_conf = llm_analysis.get("confidence", 0.5) * 100
+            llm_conf = llm_analysis.get("confidence", 0.5)
             combined += llm_conf * llm_weight
 
         if signal == "HOLD" or (hold_prob > 50 and buy_prob < 25 and sell_prob < 25):
@@ -75,7 +75,7 @@ class ConfidenceCalculator:
             if spread > 15:
                 combined *= 1.05
 
-        confidence = min(max(combined, 0), 100)
+        confidence = min(max(combined, 0), 1.0)
         return confidence
 
     def _check_alignment(self, ml_signal: Dict, trend_result: Dict) -> float:
@@ -103,4 +103,4 @@ class ConfidenceCalculator:
         return 0.5
 
     def is_tradeable(self, confidence: float) -> bool:
-        return confidence >= config.ai_filter["min_confidence"] * 100
+        return confidence >= config.ai_filter["min_confidence"]

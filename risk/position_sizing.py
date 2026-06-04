@@ -6,8 +6,28 @@ from utils.logger import get_logger
 
 
 class PositionSizer:
+    BALANCE_TIERS = [
+        (0, 200, 0.0025, 0.01),
+        (200, 500, 0.0035, 0.02),
+        (500, 2000, 0.0050, 0.05),
+        (2000, 5000, 0.0050, 0.20),
+        (5000, float("inf"), 0.0050, 0.50),
+    ]
+
     def __init__(self):
         self.logger = get_logger("position_sizer")
+
+    def get_balance_tier_risk_pct(self, balance: float) -> float:
+        for lo, hi, risk, _ in self.BALANCE_TIERS:
+            if lo <= balance < hi:
+                return risk
+        return 0.005
+
+    def get_balance_tier_max_lot(self, balance: float) -> float:
+        for lo, hi, _, max_lot in self.BALANCE_TIERS:
+            if lo <= balance < hi:
+                return max_lot
+        return 0.50
 
     def calculate_lot_size(
         self,
@@ -22,31 +42,25 @@ class PositionSizer:
         if stop_loss_pips <= 0 or pip_val <= 0:
             return 0.01
 
-        risk_amount = balance * risk_pct * volatility_multiplier * aggressiveness_mult
+        tier_risk_pct = self.get_balance_tier_risk_pct(balance)
+        effective_risk = min(risk_pct, tier_risk_pct)
+        risk_amount = balance * effective_risk * volatility_multiplier * aggressiveness_mult
         max_risk = balance * config.risk["max_risk_pct"] * 2
         risk_amount = min(risk_amount, max_risk)
 
         contract_size = 100000
         lot_size = risk_amount / (stop_loss_pips * pip_val * (contract_size / 100000))
 
-        if balance < 200:
-            lot_size = min(lot_size, 0.05)
-        elif balance < 500:
-            lot_size = min(lot_size, 0.10)
-        elif balance < 1000:
-            lot_size = min(lot_size, 0.20)
-        elif balance < 5000:
-            lot_size = min(lot_size, 0.50)
-        else:
-            lot_size = min(lot_size, 1.0)
+        max_lot = self.get_balance_tier_max_lot(balance)
+        lot_size = min(lot_size, max_lot)
 
         lot_size = max(lot_size, 0.01)
         lot_size = round(lot_size, 2)
 
         self.logger.info(
-            f"Position sizing: balance=${balance:.2f}, risk={risk_pct*100:.2f}%, "
+            f"Position sizing: balance=${balance:.2f}, risk={effective_risk*100:.2f}%, "
             f"SL={stop_loss_pips:.0f}pips, mult={volatility_multiplier:.2f}x, "
-            f"aggr={aggressiveness_mult:.2f}x, lot={lot_size}"
+            f"aggr={aggressiveness_mult:.2f}x, lot={lot_size} (max_lot={max_lot})"
         )
         return lot_size
 

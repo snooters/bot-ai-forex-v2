@@ -18,6 +18,7 @@ class DecisionLogger:
     def log_decision(self, symbol: str, decision: Dict):
         timestamp = datetime.now().isoformat()
         filename = f"decision_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        context = decision.get("context", {})
         record = {
             "timestamp": timestamp,
             "symbol": symbol,
@@ -28,6 +29,16 @@ class DecisionLogger:
                 "no_trade": decision.get("no_trade", True),
                 "no_trade_reasons": decision.get("no_trade_reasons", []),
                 "reasons": decision.get("reasons", []),
+            },
+            "context": {
+                "trend": context.get("trend"),
+                "regime": context.get("regime"),
+                "volatility": context.get("volatility"),
+                "momentum": context.get("momentum"),
+                "timeframe": context.get("timeframe"),
+                "price": context.get("price"),
+                "spread": context.get("spread"),
+                "feature_summary": context.get("feature_summary", {}),
             },
             "ml_signal": decision.get("ml_signal", {}),
             "account_status": decision.get("account_status", {}),

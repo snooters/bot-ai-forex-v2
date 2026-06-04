@@ -25,6 +25,8 @@ class CandlePatternEngine:
         self._detect_engulfing(df)
         self._detect_morning_evening_star(df)
         self._detect_shooting_star(df)
+        self._detect_three_soldiers(df)
+        self._detect_three_crows(df)
 
         return df
 
@@ -174,6 +176,62 @@ class CandlePatternEngine:
                 and df["close"].iloc[i] < df["open"].iloc[i]
             ):
                 df.at[df.index[i], "candle_pattern"] = CandlePattern.SHOOTING_STAR.value
+                df.at[df.index[i], "pattern_bearish"] = 1
+
+    def _detect_three_soldiers(self, df: pd.DataFrame):
+        for i in range(2, len(df)):
+            c1, c2, c3 = (
+                df.iloc[i - 2], df.iloc[i - 1], df.iloc[i]
+            )
+            b1 = c1["close"] > c1["open"]
+            b2 = c2["close"] > c2["open"]
+            b3 = c3["close"] > c3["open"]
+            if not (b1 and b2 and b3):
+                continue
+            body1 = abs(c1["close"] - c1["open"])
+            body2 = abs(c2["close"] - c2["open"])
+            body3 = abs(c3["close"] - c3["open"])
+            if body1 == 0 or body2 == 0 or body3 == 0:
+                continue
+            if (
+                body2 <= body1 * 1.5
+                and body3 <= body2 * 1.5
+                and c2["close"] > c1["close"]
+                and c3["close"] > c2["close"]
+                and c2["open"] > c1["open"]
+                and c3["open"] > c2["open"]
+                and c2["open"] > c1["close"] * 0.98
+                and c3["open"] > c2["close"] * 0.98
+            ):
+                df.at[df.index[i], "candle_pattern"] = CandlePattern.THREE_WHITE_SOLDIERS.value
+                df.at[df.index[i], "pattern_bullish"] = 1
+
+    def _detect_three_crows(self, df: pd.DataFrame):
+        for i in range(2, len(df)):
+            c1, c2, c3 = (
+                df.iloc[i - 2], df.iloc[i - 1], df.iloc[i]
+            )
+            b1 = c1["close"] < c1["open"]
+            b2 = c2["close"] < c2["open"]
+            b3 = c3["close"] < c3["open"]
+            if not (b1 and b2 and b3):
+                continue
+            body1 = abs(c1["close"] - c1["open"])
+            body2 = abs(c2["close"] - c2["open"])
+            body3 = abs(c3["close"] - c3["open"])
+            if body1 == 0 or body2 == 0 or body3 == 0:
+                continue
+            if (
+                body2 <= body1 * 1.5
+                and body3 <= body2 * 1.5
+                and c2["close"] < c1["close"]
+                and c3["close"] < c2["close"]
+                and c2["open"] < c1["open"]
+                and c3["open"] < c2["open"]
+                and c2["open"] < c1["close"] * 1.02
+                and c3["open"] < c2["close"] * 1.02
+            ):
+                df.at[df.index[i], "candle_pattern"] = CandlePattern.THREE_BLACK_CROWS.value
                 df.at[df.index[i], "pattern_bearish"] = 1
 
     def get_current_pattern(self, df: pd.DataFrame) -> str:

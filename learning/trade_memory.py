@@ -2,8 +2,11 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
+import sqlite3
+import uuid
+import threading
 
-from core.constants import TRADE_HISTORY_DIR
+from core.constants import TRADE_HISTORY_DIR, Timeframe
 from utils.logger import get_logger
 
 
@@ -27,9 +30,49 @@ class TradeMemory:
         self.logger = get_logger("trade_memory")
         self._memory_dir = Path(TRADE_HISTORY_DIR)
         self._memory_dir.mkdir(parents=True, exist_ok=True)
-        self._memory_file = self._memory_dir / "trade_memory.json"
+        self._db_path = self._memory_dir / "trade_memory.db"
+        self._json_path = self._memory_dir / "trade_memory.json"
+        self._lock = threading.Lock()
         self._trades: List[Dict] = []
+        self._init_db()
         self._load()
+
+    def _init_db(self):
+        with self._lock:
+            conn = sqlite3.connect(str(self._db_path))
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    trade_id TEXT PRIMARY KEY,
+                    pair TEXT,
+                    timeframe TEXT,
+                    direction TEXT,
+                    entry_price REAL,
+                    exit_price REAL,
+                    volume REAL,
+                    profit REAL,
+                    profit_pips REAL,
+                    result TEXT,
+                    exit_reason TEXT,
+                    entry_time TEXT,
+                    exit_time TEXT,
+                    model_version TEXT,
+                    confidence REAL,
+                    trade_duration_minutes REAL,
+                    max_dd_during_trade REAL,
+                    spread REAL,
+                    commission REAL,
+                    swap REAL,
+                    session TEXT,
+                    indicators TEXT,
+                    market_conditions TEXT,
+                    created_at TEXT
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_pair ON trades(pair)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_result ON trades(result)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_entry_time ON trades(entry_time)")
+            conn.commit()
+            conn.close()
 
     def record_trade(
         self,
@@ -51,14 +94,21 @@ class TradeMemory:
         confidence: float = 0.0,
         trade_duration_minutes: Optional[float] = None,
         max_dd_during_trade: Optional[float] = None,
-        spread_at_entry: float = 0.0,
+        spread: float = 0.0,
+        commission: float = 0.0,
+        swap: float = 0.0,
+        session: str = "",
     ):
         if indicators is None:
             indicators = {}
         if market_conditions is None:
             market_conditions = {}
 
+        trade_id = str(uuid.uuid4())[:8]
+        dur = trade_duration_minutes or self._calc_duration(entry_time, exit_time)
+
         record = {
+            "trade_id": trade_id,
             "pair": pair,
             "timeframe": timeframe,
             "direction": direction,
@@ -73,16 +123,20 @@ class TradeMemory:
             "exit_time": exit_time,
             "model_version": model_version,
             "confidence": round(confidence, 2),
-            "trade_duration_minutes": trade_duration_minutes or self._calc_duration(entry_time, exit_time),
+            "trade_duration_minutes": dur,
             "max_dd_during_trade": round(max_dd_during_trade, 4) if max_dd_during_trade else 0,
-            "spread_at_entry": round(spread_at_entry, 1),
-            "indicators": {k: round(v, 6) if isinstance(v, float) else v for k, v in indicators.items() if k in INDICATOR_FIELDS},
+            "spread": round(spread, 1),
+            "commission": round(commission, 2),
+            "swap": round(swap, 2),
+            "session": session,
+            "indicators": {k: round(v, 6) if isinstance(v, float) else v
+                          for k, v in indicators.items() if k in INDICATOR_FIELDS},
             "market_conditions": market_conditions,
-            "timestamp": datetime.now().isoformat(),
+            "created_at": datetime.now().isoformat(),
         }
 
         self._trades.append(record)
-        self._save()
+        self._insert_sqlite(record)
         return record
 
     def record_from_trade_log(self, trade: Dict, indicators: Optional[Dict] = None):
@@ -113,8 +167,43 @@ class TradeMemory:
             market_conditions=trade.get("market_conditions", {}),
             model_version=trade.get("model_version", "unknown"),
             confidence=trade.get("confidence", 0),
-            spread_at_entry=trade.get("spread_at_entry", 0),
+            spread=trade.get("spread", trade.get("spread_at_entry", 0)),
+            commission=trade.get("commission", 0),
+            swap=trade.get("swap", 0),
+            session=trade.get("session", ""),
         )
+
+    def _insert_sqlite(self, record: Dict):
+        try:
+            with self._lock:
+                conn = sqlite3.connect(str(self._db_path))
+                conn.execute("""
+                    INSERT OR REPLACE INTO trades
+                    (trade_id, pair, timeframe, direction, entry_price, exit_price,
+                     volume, profit, profit_pips, result, exit_reason,
+                     entry_time, exit_time, model_version, confidence,
+                     trade_duration_minutes, max_dd_during_trade,
+                     spread, commission, swap, session,
+                     indicators, market_conditions, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    record["trade_id"], record["pair"], record["timeframe"],
+                    record["direction"], record["entry_price"], record["exit_price"],
+                    record["volume"], record["profit"], record["profit_pips"],
+                    record["result"], record["exit_reason"],
+                    record["entry_time"], record["exit_time"],
+                    record["model_version"], record["confidence"],
+                    record["trade_duration_minutes"], record["max_dd_during_trade"],
+                    record["spread"], record["commission"], record["swap"],
+                    record["session"],
+                    json.dumps(record.get("indicators", {})),
+                    json.dumps(record.get("market_conditions", {})),
+                    record["created_at"],
+                ))
+                conn.commit()
+                conn.close()
+        except Exception as e:
+            self.logger.error(f"SQLite insert failed: {e}")
 
     def get_all_trades(self) -> List[Dict]:
         return list(self._trades)
@@ -130,6 +219,10 @@ class TradeMemory:
 
     def get_by_timeframe(self, tf: str) -> List[Dict]:
         return [t for t in self._trades if t["timeframe"] == tf]
+
+    def get_trades_for_timeframe(self, timeframe: int) -> List[Dict]:
+        tf_label = Timeframe.LABELS.get(timeframe, f"M{timeframe}")
+        return [t for t in self._trades if t.get("timeframe") == tf_label]
 
     def get_by_date_range(self, start_date: date, end_date: date) -> List[Dict]:
         result = []
@@ -245,18 +338,65 @@ class TradeMemory:
             return 0.0
 
     def _load(self):
-        if self._memory_file.exists():
+        try:
+            with self._lock:
+                conn = sqlite3.connect(str(self._db_path))
+                rows = conn.execute("SELECT * FROM trades ORDER BY created_at").fetchall()
+                col_names = [d[1] for d in conn.execute("PRAGMA table_info(trades)").fetchall()]
+                conn.close()
+            self._trades = []
+            for row in rows:
+                rec = dict(zip(col_names, row))
+                rec["indicators"] = json.loads(rec.get("indicators") or "{}")
+                rec["market_conditions"] = json.loads(rec.get("market_conditions") or "{}")
+                self._trades.append(rec)
+            if not self._trades and self._json_path.exists():
+                self.logger.info("SQLite empty but JSON exists — migrating")
+                self._load_json_fallback()
+            else:
+                self.logger.info(f"Loaded {len(self._trades)} trades from SQLite")
+        except Exception as e:
+            self.logger.warning(f"SQLite load failed ({e}), trying JSON fallback")
+            self._load_json_fallback()
+
+    def _load_json_fallback(self):
+        if self._json_path.exists():
             try:
-                with open(self._memory_file) as f:
-                    self._trades = json.load(f)
-                self.logger.info(f"Loaded {len(self._trades)} trade memory records")
-            except Exception as e:
-                self.logger.warning(f"Failed to load trade memory: {e}")
+                with open(self._json_path) as f:
+                    data = json.load(f)
+                self._trades = []
+                for rec in data:
+                    rec["trade_id"] = rec.get("trade_id", str(uuid.uuid4())[:8])
+                    rec["spread"] = rec.get("spread", rec.get("spread_at_entry", 0))
+                    rec["commission"] = rec.get("commission", 0)
+                    rec["swap"] = rec.get("swap", 0)
+                    rec["session"] = rec.get("session", "")
+                    rec["created_at"] = rec.get("created_at", rec.get("timestamp", datetime.now().isoformat()))
+                    self._trades.append(rec)
+                    self._insert_sqlite(rec)
+                self.logger.info(f"Migrated {len(self._trades)} trades from JSON to SQLite")
+            except Exception as e2:
+                self.logger.warning(f"JSON fallback also failed: {e2}")
                 self._trades = []
 
-    def _save(self):
-        try:
-            with open(self._memory_file, "w") as f:
-                json.dump(self._trades, f, indent=2, default=str)
-        except Exception as e:
-            self.logger.error(f"Failed to save trade memory: {e}")
+    def get_summary_stats(self) -> Dict:
+        if not self._trades:
+            return {}
+        wins = self.get_wins()
+        losses = self.get_losses()
+        total = len(self._trades)
+        win_rate = len(wins) / total * 100 if total > 0 else 0
+        gross_profit = sum(t["profit"] for t in wins)
+        gross_loss = abs(sum(t["profit"] for t in losses))
+        pf = gross_profit / gross_loss if gross_loss > 0 else 0
+        profits = [t["profit"] for t in self._trades]
+        avg_profit = sum(profits) / len(profits) if profits else 0
+        return {
+            "total_trades": total,
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(win_rate, 1),
+            "profit_factor": round(pf, 2),
+            "avg_profit": round(avg_profit, 2),
+            "net_profit": round(sum(profits), 2),
+        }

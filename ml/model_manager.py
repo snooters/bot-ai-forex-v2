@@ -718,6 +718,9 @@ class ModelManager:
     def get_total_retrains(self) -> int:
         return self._load_retrain_counts().get("total", 0)
 
+    def get_last_retrain_time(self) -> Optional[str]:
+        return self._load_retrain_counts().get("last_retrain")
+
     def get_retrain_count(self, timeframe: int) -> int:
         key = self._tf_label(timeframe)
         return self._load_retrain_counts().get(key, 0)

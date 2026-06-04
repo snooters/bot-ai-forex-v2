@@ -5,7 +5,12 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime
 
+from rich.console import Console
+from rich.logging import RichHandler
+
 from core.constants import LOG_DIR
+
+_rich_console = Console()
 
 
 class BotLogger:
@@ -32,20 +37,27 @@ class BotLogger:
         logger.setLevel(getattr(logging, level.upper(), logging.INFO))
         logger.handlers.clear()
 
-        fmt = logging.Formatter(
+        ch = RichHandler(
+            console=_rich_console,
+            show_time=True,
+            show_level=True,
+            show_path=False,
+            markup=True,
+            rich_tracebacks=True,
+            tracebacks_show_locals=False,
+            log_time_format="%Y-%m-%d %H:%M:%S",
+        )
+        logger.addHandler(ch)
+
+        file_fmt = logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         )
-
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(fmt)
-        logger.addHandler(ch)
-
         log_file = Path(LOG_DIR) / f"{name}.log"
         fh = RotatingFileHandler(
             str(log_file), maxBytes=10_485_760, backupCount=5, encoding="utf-8"
         )
-        fh.setFormatter(fmt)
+        fh.setFormatter(file_fmt)
         logger.addHandler(fh)
 
         self._loggers[name] = logger
@@ -57,3 +69,7 @@ bot_logger = BotLogger()
 
 def get_logger(name: str) -> logging.Logger:
     return bot_logger.get_logger(name)
+
+
+def get_console() -> Console:
+    return _rich_console

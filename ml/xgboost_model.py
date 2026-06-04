@@ -40,7 +40,6 @@ class XGBoostModel:
             "gamma": kwargs.get("gamma", 0.1),
             "reg_alpha": kwargs.get("reg_alpha", 0.1),
             "reg_lambda": kwargs.get("reg_lambda", 1.0),
-            "scale_pos_weight": kwargs.get("scale_pos_weight", 1),
             "random_state": kwargs.get("random_state", 42),
             "n_jobs": kwargs.get("n_jobs", -1),
             "eval_metric": kwargs.get("eval_metric", "mlogloss"),
@@ -54,9 +53,20 @@ class XGBoostModel:
         return self.model
 
     @safe_execute(default_return=None, raise_on_error=True)
-    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None):
+    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
+              progress_callback=None):
         if self.model is None:
             self.create_model()
+        if progress_callback is not None:
+            try:
+                from xgboost.callback import TrainingCallback
+                class _ProgressCB(TrainingCallback):
+                    def after_iteration(self, bst, epoch, evals_log):
+                        progress_callback(epoch + 1)
+                        return False
+                self.model.callbacks = [_ProgressCB()]
+            except Exception:
+                pass
         eval_set = [(X_train, y_train)]
         if X_val is not None and y_val is not None:
             eval_set.append((X_val, y_val))
@@ -64,6 +74,7 @@ class XGBoostModel:
         if sample_weight is not None:
             fit_kwargs["sample_weight"] = sample_weight
         self.model.fit(X_train, y_train, **fit_kwargs)
+        self.model.callbacks = None
         self._trained = True
         train_score = self.model.score(X_train, y_train)
         val_score = self.model.score(X_val, y_val) if X_val is not None else None

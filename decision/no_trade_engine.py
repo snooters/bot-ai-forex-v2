@@ -22,6 +22,8 @@ class NoTradeEngine:
         news_analysis: Optional[Dict] = None,
         regime_result: Optional[Dict] = None,
         existing_positions: List = None,
+        balance: float = 0,
+        trend_result: Optional[Dict] = None,
     ) -> int:
         self._reasons = []
         self._severity = 0
@@ -29,25 +31,31 @@ class NoTradeEngine:
         if not config.ai_filter["allow_no_trade"]:
             return 0
 
-        min_conf = config.ai_filter["min_confidence"] * 100
+        # P3: Quality gate — unified threshold for all trends
+        QUALITY_MIN_CONF = 0.60
+        QUALITY_MIN_SCORE = 45
+        if confidence < QUALITY_MIN_CONF:
+            self._severity = max(self._severity, 2)
+            self._reasons.append(f"Quality gate: confidence {confidence:.0%} < {QUALITY_MIN_CONF:.0%}")
+        if market_score < QUALITY_MIN_SCORE:
+            self._severity = max(self._severity, 2)
+            self._reasons.append(f"Quality gate: market score {market_score} < {QUALITY_MIN_SCORE}")
+
+        dynamic_min = config.get_dynamic_min_confidence(balance)
+        min_conf = max(config.ai_filter["min_confidence"], dynamic_min)
         if confidence < min_conf:
             gap = min_conf - confidence
-            if gap > 20:
+            if gap > 0.20:
                 self._severity = max(self._severity, 2)
-                self._reasons.append(f"Critical low confidence: {confidence:.1f}% < {min_conf:.0f}%")
+                self._reasons.append(f"Critical low confidence: {confidence:.0%} < {min_conf:.0%}")
             else:
                 self._severity = max(self._severity, 1)
-                self._reasons.append(f"Low confidence: {confidence:.1f}% < {min_conf:.0f}%")
+                self._reasons.append(f"Low confidence: {confidence:.0%} < {min_conf:.0%}")
 
         min_score = config.ai_filter["min_market_score"]
         if market_score < min_score:
-            gap = min_score - market_score
-            if gap > 20:
-                self._severity = max(self._severity, 2)
-                self._reasons.append(f"Critical low market score: {market_score} < {min_score}")
-            else:
-                self._severity = max(self._severity, 1)
-                self._reasons.append(f"Low market score: {market_score} < {min_score}")
+            self._severity = max(self._severity, 2)
+            self._reasons.append(f"Critical low market score: {market_score} < {min_score}")
 
         max_spread = config.ai_filter["max_spread_pips"]
         if spread is not None and spread > max_spread:
@@ -74,13 +82,13 @@ class NoTradeEngine:
                     self._reasons.append("Extreme volatility detected")
 
         if existing_positions:
-            max_pos = config.risk["max_open_positions"]
+            max_pos = config.get_dynamic_max_positions(balance)
             if len(existing_positions) >= max_pos:
                 self._severity = max(self._severity, 2)
                 self._reasons.append(f"Max positions reached ({max_pos})")
 
         if self._reasons:
-            self.logger.info(f"NO TRADE severity={self._severity}: {'; '.join(self._reasons)}")
+            self.logger.debug(f"NO TRADE severity={self._severity}: {'; '.join(self._reasons)}")
 
         return self._severity
 

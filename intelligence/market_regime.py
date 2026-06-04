@@ -33,8 +33,10 @@ class MarketRegimeDetector:
         ] and trend_strength > 0.5 and vol_score > 40
 
         weak_trending = trend_dir in [
+            TrendDirection.BULLISH.value,
+            TrendDirection.BEARISH.value,
             TrendDirection.WEAK_BULLISH.value,
-            TrendDirection.WEAK_BEARISH.value
+            TrendDirection.WEAK_BEARISH.value,
         ] or (trend_strength > 0.2 and vol_score < 60)
 
         sideways = trend_dir in [

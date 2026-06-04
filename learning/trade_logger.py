@@ -141,6 +141,96 @@ class TradeLogger:
         except Exception as e:
             self.logger.error(f"Failed to save trade history: {e}")
 
+    def sync_from_mt5(self, mt5_connector=None):
+        if mt5_connector is None:
+            return 0
+        try:
+            from data.mt5_connector import MT5Connector
+            if not isinstance(mt5_connector, MT5Connector):
+                return 0
+        except ImportError:
+            return 0
+
+        deals = mt5_connector.get_history_deals()
+        if not deals:
+            self.logger.info("No MT5 history deals to sync")
+            return 0
+
+        existing_tickets = {t["ticket"] for t in self._trades}
+        new_count = 0
+        deal_orders: Dict[int, List[Dict]] = {}
+        for d in deals:
+            deal_orders.setdefault(d.get("order", 0), []).append(d)
+
+        for order, order_deals in deal_orders.items():
+            if not order_deals:
+                continue
+            entry_deal = None
+            exit_deal = None
+            for d in order_deals:
+                etype = d.get("entry", -1)
+                deal_type = d.get("type", -1)
+                if etype in (0, 1) and deal_type in (0, 1):
+                    entry_deal = d
+                elif etype in (2, 3):
+                    exit_deal = d
+            if entry_deal is None:
+                continue
+            ticket = entry_deal.get("position_id", entry_deal.get("ticket", 0))
+            if ticket == 0:
+                ticket = entry_deal.get("ticket", 0)
+            if ticket in existing_tickets:
+                continue
+
+            direction = "BUY" if entry_deal.get("type", 0) == 0 else "SELL"
+            entry_price = entry_deal.get("price", 0)
+            volume = entry_deal.get("volume", 0)
+            symbol = entry_deal.get("symbol", "")
+            entry_ts = entry_deal.get("time", 0)
+            profit = 0
+            exit_price = entry_price
+            exit_ts = 0
+            if exit_deal:
+                profit = exit_deal.get("profit", 0) + exit_deal.get("swap", 0) + exit_deal.get("commission", 0)
+                exit_price = exit_deal.get("price", entry_price)
+                exit_ts = exit_deal.get("time", 0)
+            elif entry_deal.get("profit", 0) != 0:
+                profit = entry_deal.get("profit", 0) + entry_deal.get("swap", 0) + entry_deal.get("commission", 0)
+                exit_price = entry_price
+                exit_ts = entry_ts
+
+            trade_record = {
+                "ticket": ticket,
+                "symbol": symbol,
+                "direction": direction,
+                "volume": float(volume),
+                "entry_price": float(entry_price),
+                "stop_loss": 0,
+                "take_profit": 0,
+                "entry_time": datetime.fromtimestamp(entry_ts).isoformat() if entry_ts else datetime.now().isoformat(),
+                "exit_time": datetime.fromtimestamp(exit_ts).isoformat() if exit_ts else datetime.now().isoformat(),
+                "exit_price": float(exit_price),
+                "profit": float(profit),
+                "profit_pips": float((exit_price - entry_price) / 0.0001) if direction == "BUY" else float((entry_price - exit_price) / 0.0001),
+                "exit_reason": "MT5",
+                "confidence": 0,
+                "market_score": 0,
+                "model_version": "unknown",
+                "timeframe": "M15",
+                "market_conditions": {},
+                "synced_from_mt5": True,
+            }
+            if "JPY" in symbol.upper():
+                trade_record["profit_pips"] = trade_record["profit_pips"] / 100
+            self._trades.append(trade_record)
+            existing_tickets.add(ticket)
+            new_count += 1
+
+        if new_count > 0:
+            self._save()
+            self.logger.info(f"Synced {new_count} trades from MT5 history (total: {len(self._trades)})")
+        return new_count
+
     def export_to_csv(self, path: Optional[str] = None):
         if path is None:
             path = self._trade_dir / "trade_history.csv"

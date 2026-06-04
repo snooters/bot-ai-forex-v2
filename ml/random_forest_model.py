@@ -47,13 +47,25 @@ class RandomForestModel:
         return self.model
 
     @safe_execute(default_return=None, raise_on_error=True)
-    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None):
+    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
+              progress_callback=None):
         if self.model is None:
             self.create_model()
         fit_kwargs = {}
         if sample_weight is not None:
             fit_kwargs["sample_weight"] = sample_weight
-        self.model.fit(X_train, y_train, **fit_kwargs)
+        if progress_callback is not None:
+            n_estimators = self.model.get_params().get("n_estimators", 200)
+            chunk = 25
+            self.model.set_params(warm_start=True)
+            for i in range(chunk, n_estimators + 1, chunk):
+                self.model.set_params(n_estimators=i)
+                self.model.fit(X_train, y_train, **fit_kwargs)
+                progress_callback(i)
+            self.model.set_params(warm_start=False)
+            self.model.n_estimators = n_estimators
+        else:
+            self.model.fit(X_train, y_train, **fit_kwargs)
         self._trained = True
         train_score = self.model.score(X_train, y_train)
         val_score = self.model.score(X_val, y_val) if X_val is not None and y_val is not None else None

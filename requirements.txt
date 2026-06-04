@@ -19,8 +19,7 @@ aiohttp>=3.9.0
 # Optional: LLM
 # openai>=1.0.0  # Uncomment if using OpenAI-compatible API
 
-# Optional: Visualization (for dashboard)
-# rich>=13.0.0  # Uncomment for enhanced console output
+rich>=13.0.0
 
 # Development
 # black, flake8, mypy  # Optional dev dependencies

@@ -18,7 +18,7 @@ class PerformanceAnalyzer:
         self.logger = get_logger("performance_analyzer")
         self._history: List[Dict] = []
 
-    def analyze_trades(self, trades: List[Dict]) -> Dict:
+    def analyze_trades(self, trades: List[Dict], start_balance: float = 0) -> Dict:
         closed = [t for t in trades if t.get("profit") is not None]
         if not closed:
             return self._empty_result()
@@ -46,7 +46,7 @@ class PerformanceAnalyzer:
         net_profit = gross_profit - gross_loss
         expectancy = compute_expectancy(closed)
 
-        equity_curve = self._build_equity_curve(trades)
+        equity_curve = self._build_equity_curve(trades, start_balance)
         max_dd, max_dd_idx = compute_max_drawdown(equity_curve)
 
         sharpe = compute_sharpe_ratio(profits)
@@ -105,13 +105,17 @@ class PerformanceAnalyzer:
 
         return result
 
-    def _build_equity_curve(self, trades: List[Dict]) -> List[float]:
+    def _build_equity_curve(self, trades: List[Dict], start_balance: float = 0) -> List[float]:
         closed = [t for t in trades if t.get("profit") is not None]
         closed.sort(key=lambda t: t.get("exit_time", ""))
-        equity = [0]
+        if not closed:
+            return []
+        balance = start_balance if start_balance > 0 else 10000
+        equity = []
         for t in closed:
-            equity.append(equity[-1] + t.get("profit", 0))
-        return equity[1:]
+            balance += t.get("profit", 0)
+            equity.append(balance)
+        return equity
 
     def get_analysis_summary(self, trades: List[Dict]) -> str:
         analysis = self.analyze_trades(trades)

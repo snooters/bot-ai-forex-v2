@@ -8,6 +8,7 @@ from core.config import config
 from core.constants import RETRAIN_TRADE_COUNT
 from learning.trade_logger import TradeLogger
 from learning.trade_memory import TradeMemory
+from learning.mistake_weighting import MistakeWeighting
 from learning.concept_drift import ConceptDriftDetector
 from learning.performance_analyzer import PerformanceAnalyzer
 from ml.trainer import ModelTrainer
@@ -84,17 +85,22 @@ class AutoRetrainEngine:
 
     def retrain(self, training_data: pd.DataFrame, timeframe: Optional[int] = None,
                 sample_weight_multiplier: float = 1.0,
-                model_params: Optional[Dict] = None) -> Dict:
+                model_params: Optional[Dict] = None,
+                progress=None,
+                tf_label=None) -> Dict:
         self.logger.info(f"Starting auto retrain for timeframe={timeframe} "
                          f"(weight_mult={sample_weight_multiplier})...")
 
         self.model_trainer.ensemble = VotingEnsemble()
 
         try:
-            X, y, features = self.model_trainer.prepare_training_data(training_data)
+            X, y, features, df_clean = self.model_trainer.prepare_training_data(training_data)
         except Exception as e:
             self.logger.error(f"Failed to prepare training data: {e}")
             return {"success": False, "error": str(e)}
+
+        from ml.trainer import ModelTrainer as _MT
+        recency = _MT.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
 
         self.logger.info(f"Training samples: {len(X)} | features: {len(features)} | labels: BUY={(y==0).sum()} SELL={(y==1).sum()} HOLD={(y==2).sum()}")
 
@@ -103,6 +109,9 @@ class AutoRetrainEngine:
                 X, y,
                 sample_weight_multiplier=sample_weight_multiplier,
                 model_params=model_params,
+                progress=progress,
+                tf_label=tf_label,
+                recency_weights=recency,
             )
         except Exception as e:
             self.logger.error(f"Failed to train models: {e}")
@@ -207,7 +216,21 @@ class AutoRetrainEngine:
                     f"({recent_wins}/{len(recent)} wins last {len(recent)} trades)"
                 )
 
+        hold_retrain, hold_reason = self._check_incorrect_holds()
+        if hold_retrain:
+            return True, hold_reason
+
         return False, "no mistake patterns detected"
+
+    def _check_incorrect_holds(self) -> Tuple[bool, str]:
+        mw = MistakeWeighting(self.trade_memory)
+        incorrect_hold_rate = mw.get_incorrect_hold_rate()
+        if incorrect_hold_rate > 0.4:
+            return True, (
+                f"High INCORRECT_HOLD rate: {incorrect_hold_rate:.0%} "
+                f"— model may be missing opportunities"
+            )
+        return False, "incorrect hold rate acceptable"
 
     @property
     def retrain_count(self) -> int:

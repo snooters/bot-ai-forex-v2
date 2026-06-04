@@ -1,7 +1,12 @@
-import numpy as np
+import json
+from pathlib import Path
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
+import numpy as np
+
+from core.constants import DECISION_LOG_DIR
 from learning.trade_memory import TradeMemory
 from utils.logger import get_logger
 
@@ -14,6 +19,113 @@ class MistakeWeighting:
 
     def set_feature_importance(self, importance: Dict):
         self._feature_importance = importance
+
+    def _load_incorrect_holds(self, lookback_hours: int = 168) -> List[Dict]:
+        eval_dir = Path(DECISION_LOG_DIR) / "evaluated"
+        if not eval_dir.exists():
+            return []
+        cutoff = datetime.now() - timedelta(hours=lookback_hours)
+        results = []
+        for f in eval_dir.glob("eval_*.json"):
+            try:
+                with open(f) as fh:
+                    data = json.load(fh)
+                ts = data.get("timestamp", "")
+                if ts and datetime.fromisoformat(ts) >= cutoff:
+                    if data.get("outcome") == "INCORRECT_HOLD":
+                        results.append(data)
+            except Exception:
+                continue
+        return results
+
+    def compute_no_trade_weights(
+        self,
+        X: np.ndarray,
+        sample_weight: np.ndarray,
+        feature_cols: List[str],
+    ) -> np.ndarray:
+        weights = sample_weight.copy()
+        incorrect_holds = self._load_incorrect_holds(lookback_hours=168)
+        if len(incorrect_holds) < 3:
+            return weights
+
+        hold_contexts = []
+        for h in incorrect_holds:
+            ctx = h.get("context", {})
+            hold_contexts.append(ctx)
+
+        flips = 0
+        for i in range(len(X)):
+            sample = X[i]
+            similar_holds = self._find_similar_hold_contexts(
+                sample, incorrect_holds, hold_contexts, feature_cols, top_k=5
+            )
+            if len(similar_holds) >= 3:
+                weights[i] *= 1.5
+                flips += 1
+
+        if flips > 0:
+            self.logger.info(
+                f"No-trade weighting: {flips}/{len(X)} samples up-weighted "
+                f"(similar to past INCORRECT_HOLD patterns)"
+            )
+        return weights
+
+    def _find_similar_hold_contexts(
+        self,
+        sample: np.ndarray,
+        holds: List[Dict],
+        hold_contexts: List[Dict],
+        feature_cols: List[str],
+        top_k: int = 5,
+    ) -> List[Dict]:
+        if not holds:
+            return []
+        weighted_importances = self._get_feature_weights(feature_cols)
+        scored = []
+        for i, h in enumerate(holds):
+            ctx = hold_contexts[i] if i < len(hold_contexts) else {}
+            fsum = ctx.get("feature_summary", {})
+            if not fsum:
+                continue
+            vec = []
+            valid = True
+            for col in feature_cols:
+                val = fsum.get(col)
+                if val is None:
+                    valid = False
+                    break
+                try:
+                    vec.append(float(val))
+                except (ValueError, TypeError):
+                    valid = False
+                    break
+            if not valid:
+                continue
+            trade_vec = np.array(vec)
+            dist = self._weighted_distance(sample, trade_vec, weighted_importances)
+            scored.append((dist, h))
+        scored.sort(key=lambda x: x[0])
+        return [t for _, t in scored[:top_k]]
+
+    def get_incorrect_hold_rate(self) -> float:
+        eval_dir = Path(DECISION_LOG_DIR) / "evaluated"
+        if not eval_dir.exists():
+            return 0.0
+        total = 0
+        incorrect = 0
+        for f in eval_dir.glob("eval_*.json"):
+            try:
+                with open(f) as fh:
+                    data = json.load(fh)
+                outcome = data.get("outcome")
+                if outcome:
+                    total += 1
+                    if outcome == "INCORRECT_HOLD":
+                        incorrect += 1
+            except Exception:
+                continue
+        return incorrect / total if total > 0 else 0.0
 
     def compute_weights(
         self,
