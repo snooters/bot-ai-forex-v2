@@ -1,4 +1,4 @@
-"""Download historical data dari MT5, resample M5 → M15/M30/H1/H4.
+"""Download historical data dari MT5, resample M5 -> M15/M30/H1/H4.
 
 M5  = entry TF (source dari MT5)
 M15 = context (resample dari M5)
@@ -20,6 +20,7 @@ Usage:
 
 import argparse
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -42,8 +43,8 @@ TF_LABELS = {1: "M1", 5: "M5", 15: "M15", 30: "M30", 60: "H1", 240: "H4"}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download MT5 historical data since 2019")
-    parser.add_argument("--pair", default="EURUSD",
-                        help="Currency pair (default: EURUSD)")
+    parser.add_argument("--pair", default=config.trading["pairs"][0],
+                        help=f"Currency pair (default: {config.trading['pairs'][0]})")
     parser.add_argument("--year", type=int, default=2025,
                         help="Start year (default: 2025, tergantung broker)")
     parser.add_argument("--all", action="store_true",
@@ -73,67 +74,52 @@ def download_m5_range(
     from_date: datetime,
     to_date: datetime,
 ) -> pd.DataFrame:
-    """Download M5 data dari from_date sampai to_date via batch copy_rates_from."""
+    """Download M5 data via copy_rates_from_pos (max yg broker sediakan)."""
     mt5 = connector._mt5
     if mt5 is None:
         return pd.DataFrame()
 
-    BATCH_SIZE = 5000
-    all_bars = []
-    cursor = to_date
-    max_batches = 500
+    connector.ensure_connected()
+    mt5.symbol_select(symbol, True)
 
-    for batch in range(max_batches):
-        rates = mt5.copy_rates_from(symbol, 5, cursor, BATCH_SIZE)
-        if rates is None or len(rates) == 0:
-            logger.warning(f"  batch {batch+1}: empty ({mt5.last_error()})")
-            break
-
-        df = pd.DataFrame(rates)
-        tmin_ts = df["time"].min()
-        tmin_dt = pd.to_datetime(tmin_ts, unit="s")
-        all_bars.append(df)
-        cursor_dt = tmin_dt - pd.Timedelta(seconds=1)
-        cursor = cursor_dt.to_pydatetime()
-
-        pct = min(100, int((to_date - cursor_dt).total_seconds()
-                           / (to_date - from_date).total_seconds() * 100))
-        total_so_far = sum(len(b) for b in all_bars)
-        print(f"\r    batch {batch+1}: {len(df):,} candles "
-              f"(to {tmin_dt.date()}, {total_so_far:,} total, {pct}%)",
-              end="", file=sys.stderr)
-
-        if tmin_dt <= from_date:
-            break
-
-    print(file=sys.stderr)
-
-    if not all_bars:
+    # Binary search max candle
+    lo, hi = 50000, 200000
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        r = mt5.copy_rates_from_pos(symbol, 5, 0, mid)
+        if r is not None:
+            lo = mid
+        else:
+            hi = mid - 1
+    max_count = lo
+    rates = mt5.copy_rates_from_pos(symbol, 5, 0, max_count)
+    if rates is None or len(rates) == 0:
+        logger.error(f"  No data: {mt5.last_error()}")
         return pd.DataFrame()
 
-    full = pd.concat(all_bars, ignore_index=True)
-    full.drop_duplicates(subset=["time"], keep="last", inplace=True)
-    full.sort_values("time", inplace=True)
-    full.reset_index(drop=True, inplace=True)
+    df = pd.DataFrame(rates)
+    df["time"] = pd.to_datetime(df["time"], unit="s")
+    df.sort_values("time", inplace=True)
+    df.drop_duplicates(subset=["time"], keep="last", inplace=True)
 
-    # Filter hanya data >= from_date
-    full = full[full["time"] >= from_date.timestamp()].copy()
+    tmin = df["time"].min()
+    tmax = df["time"].max()
+    logger.info(f"  [M5] {len(df):,} candles, {tmin.date()} -> {tmax.date()}")
 
-    # Format kolom
+    # Filter dari from_date
+    df = df[df["time"] >= pd.Timestamp(from_date)].copy()
+    logger.info(f"  [M5] after filter: {len(df):,} candles since {from_date.date()}")
+
     df_out = pd.DataFrame()
-    df_out["time"] = pd.to_datetime(full["time"], unit="s")
-    df_out["open"] = full["open"].astype(float)
-    df_out["high"] = full["high"].astype(float)
-    df_out["low"] = full["low"].astype(float)
-    df_out["close"] = full["close"].astype(float)
-    df_out["volume"] = full["tick_volume"].astype(float) if "tick_volume" in full.columns else full["volume"].astype(float)
-    df_out["spread"] = full["spread"].astype(float) if "spread" in full.columns else 0.0
+    df_out["time"] = df["time"]
+    df_out["open"] = df["open"].astype(float)
+    df_out["high"] = df["high"].astype(float)
+    df_out["low"] = df["low"].astype(float)
+    df_out["close"] = df["close"].astype(float)
+    df_out["volume"] = df["tick_volume"].astype(float) if "tick_volume" in df.columns else df["volume"].astype(float)
+    df_out["spread"] = df["spread"].astype(float) if "spread" in df.columns else 0.0
     df_out["symbol"] = symbol
     df_out["timeframe"] = 5
-
-    df_out.sort_values("time", inplace=True)
-    df_out.drop_duplicates(subset=["time"], keep="last", inplace=True)
-    df_out.reset_index(drop=True, inplace=True)
     return df_out
 
 
@@ -153,7 +139,7 @@ def download_and_save(
     logger.info(f"{'='*60}")
 
     # ── Step 1: Download M5 raw dari MT5 ──
-    logger.info(f"  [M5] fetching {from_date.date()} → {to_date.date()}...")
+    logger.info(f"  [M5] fetching {from_date.date()} -> {to_date.date()}...")
     m5 = download_m5_range(connector, symbol, from_date, to_date)
 
     if m5.empty:
@@ -164,7 +150,7 @@ def download_and_save(
     tmin = m5["time"].min()
     tmax = m5["time"].max()
     is_sim = (m5["time"].dt.microsecond > 0).any()
-    logger.info(f"  [M5] {n:,} candles, {tmin} → {tmax}")
+    logger.info(f"  [M5] {n:,} candles, {tmin} -> {tmax}")
     if is_sim:
         logger.warning(f"  [M5] WARNING: Fractional seconds detected — "
                        f"data mungkin simulasi! Gunakan MT5 real.")
@@ -174,7 +160,7 @@ def download_and_save(
 
     # ── Step 3: Resample ke M15, M30, H1, H4 ──
     m5_sorted = m5.sort_values("time").reset_index(drop=True)
-    logger.info(f"\nResampling M5 → higher timeframes...")
+    logger.info(f"\nResampling M5 -> higher timeframes...")
     for tf in [15, 30, 60, 240]:
         label = TF_LABELS.get(tf, f"TF{tf}")
         df_tf = _resample_ohlc(m5_sorted, tf)
@@ -182,7 +168,7 @@ def download_and_save(
         df_tf["timeframe"] = tf
         storage.save_data(symbol, tf, df_tf)
         logger.info(f"  [{label}] {len(df_tf):,} candles "
-                    f"({df_tf['time'].min().date()} → {df_tf['time'].max().date()})")
+                    f"({df_tf['time'].min().date()} -> {df_tf['time'].max().date()})")
 
     # ── Summary ──
     logger.info(f"\nDownload complete for {symbol}:")
@@ -191,7 +177,7 @@ def download_and_save(
         saved = storage.load_data(symbol, tf)
         if not saved.empty:
             logger.info(f"  {label}: {len(saved):,} candles "
-                        f"({saved['time'].min().date()} → {saved['time'].max().date()})")
+                        f"({saved['time'].min().date()} -> {saved['time'].max().date()})")
         else:
             logger.warning(f"  {label}: NO DATA")
 

@@ -87,7 +87,7 @@ class LSTMModel:
         return self.model
 
     @safe_execute(default_return=None, raise_on_error=True)
-    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None):
+    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None, progress_callback=None):
         if self.model is None:
             self.create_model(n_features=X_train.shape[1])
         import torch
