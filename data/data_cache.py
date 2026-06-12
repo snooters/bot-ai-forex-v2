@@ -9,7 +9,7 @@ from utils.logger import get_logger
 
 
 class RateCache:
-    def __init__(self, max_size: int = 50, default_ttl_minutes: int = 5):
+    def __init__(self, max_size: int = 50, default_ttl_minutes: int = 1):
         self._max_size = max_size
         self._default_ttl = timedelta(minutes=default_ttl_minutes)
         self._cache: OrderedDict[str, Tuple[pd.DataFrame, datetime]] = OrderedDict()

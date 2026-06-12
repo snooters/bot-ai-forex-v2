@@ -12,6 +12,9 @@ from features.price_action import PriceActionEngine
 from features.candle_patterns import CandlePatternEngine
 from features.session_features import SessionFeatureEngine
 from features.multi_tf_features import MultiTFFeatureEngine
+from features.divergence_features import DivergenceEngine
+from features.pullback_features import PullbackEngine
+from features.bounce_features import BounceEngine
 from data.data_cache import FeatureCache
 from utils.logger import get_logger
 from utils.decorators import measure_time, safe_execute
@@ -27,6 +30,9 @@ class FeaturePipeline:
         self.candle_patterns = CandlePatternEngine()
         self.session_features = SessionFeatureEngine()
         self.multi_tf_features = MultiTFFeatureEngine()
+        self.divergence = DivergenceEngine()
+        self.pullback = PullbackEngine()
+        self.bounce = BounceEngine()
         self.cache = FeatureCache()
 
     @measure_time
@@ -44,6 +50,9 @@ class FeaturePipeline:
 
         df = self.indicator_engine.compute(df)
 
+        # RSI divergence detection (needs RSI from indicator_engine)
+        df = self.divergence.compute(df)
+
         df = self.market_structure.detect_structures(df)
 
         sr_features = self.support_resistance.detect_levels(df)
@@ -52,9 +61,15 @@ class FeaturePipeline:
         df = self.price_action.detect_patterns(df)
         df = self.candle_patterns.detect_patterns(df)
 
+        # Bounce detection (needs S/R levels + candle patterns)
+        df = self.bounce.compute(df)
+
         df = self._add_derived_features(df)
 
         df = self.multi_tf_features.compute(df)
+
+        # Pullback detection (needs multi-TF features + RSI)
+        df = self.pullback.compute(df)
 
         df = self._clean_data(df)
 
@@ -63,12 +78,13 @@ class FeaturePipeline:
 
         return df
 
-    def compute_features_summary(self, df: pd.DataFrame) -> Dict:
+    def compute_features_summary(self, df: pd.DataFrame, sr_info: Optional[Dict] = None) -> Dict:
         if df.empty:
             return {}
 
-        sr = self.support_resistance.detect_levels(df)
-        sd = self.support_resistance.detect_supply_demand(df)
+        if sr_info is None:
+            sr_info = self.support_resistance.detect_levels(df)
+        sr = sr_info
 
         summary = {
             "indicators": {
@@ -143,7 +159,7 @@ class FeaturePipeline:
             df["adx_strong"] = (df["adx"] > 25).astype(int)
 
         if "close" in df.columns:
-            df["returns"] = df["close"].pct_change()
+            df["returns"] = df["close"].pct_change(fill_method=None)
             df["log_return"] = np.log(df["close"] / df["close"].shift(1))
             df["realized_vol"] = df["log_return"].rolling(20).std()
 
@@ -205,6 +221,20 @@ class FeaturePipeline:
             "session_asia", "session_london", "session_ny", "session_overlap",
             "is_monday", "is_friday", "is_midweek", "is_market_hours",
             "mtf_alignment",
+            # ── Divergence features ──
+            "div_reg_bull", "div_hid_bull",
+            "div_reg_bear", "div_hid_bear",
+            "div_strength", "div_direction",
+            # ── Pullback features ──
+            "pullback_to_ema20_60", "pullback_to_ema50_60",
+            "pullback_active_60",
+            "pullback_to_ema20_240", "pullback_to_ema50_240",
+            "pullback_active_240",
+            "pullback_quality", "pullback_direction",
+            # ── Bounce features ──
+            "bounce_support", "bounce_resistance",
+            "bounce_strength", "bounce_direction",
+            "bounce_buy_signal", "bounce_sell_signal",
         ]
         for tf in [15, 30, 60, 240]:
             cols = [

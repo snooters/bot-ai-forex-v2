@@ -35,6 +35,25 @@ logger = get_logger("train")
 PRIMARY_TF = 5
 
 
+def _get_ensemble_feature_count(ensemble) -> int:
+    """Get number of features the ensemble's models were trained with."""
+    if ensemble is None:
+        return 0
+    for name, model in ensemble.models.items():
+        if hasattr(model, 'model') and model.model is not None:
+            m = model.model
+            if hasattr(m, 'n_features_in_'):
+                return m.n_features_in_
+            if hasattr(m, '_Booster') and hasattr(m._Booster, 'num_feature'):
+                try:
+                    return m._Booster.num_feature()
+                except Exception:
+                    pass
+            if hasattr(m, 'n_estimators') and hasattr(m, 'feature_importances_'):
+                return len(m.feature_importances_)
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="AI Forex Trading Bot — Training Pipeline\n"
@@ -43,10 +62,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pair", default="EURUSD", help="Currency pair to train")
     parser.add_argument("--lookahead", type=int, default=LOOKAHEAD_5,
                         help="Lookahead candles for target (M5 bars)")
-    parser.add_argument("--buy-threshold", type=float, default=0.001,
-                        help="Return threshold for BUY signal")
-    parser.add_argument("--sell-threshold", type=float, default=0.001,
-                        help="Return threshold for SELL signal")
+    parser.add_argument("--buy-threshold", type=float,
+                        default=config.training["buy_threshold"],
+                        help="Return threshold for BUY signal (default: 0.0004 = 4 pips)")
+    parser.add_argument("--sell-threshold", type=float,
+                        default=config.training["sell_threshold"],
+                        help="Return threshold for SELL signal (default: 0.0004 = 4 pips)")
     parser.add_argument("--target-type", default="class", choices=["class", "regression"],
                         help="Target type: class (0/1/2) or regression")
     parser.add_argument("--validate", action="store_true",
@@ -57,16 +78,28 @@ def parse_args() -> argparse.Namespace:
                         help="Promote best candidate to production")
     parser.add_argument("--all", action="store_true",
                         help="Train all pairs from storage")
+    parser.add_argument("--days", type=int, default=0,
+                        help="Number of recent days of data to use (0 = all available)")
     return parser.parse_args()
 
 
-def load_m5_with_context(pair: str) -> pd.DataFrame:
+def load_m5_with_context(pair: str, days: int = 0) -> pd.DataFrame:
     """Load M5 data with M15/M30/H1/H4 context features aligned."""
-    symbol = f"{pair}.fl"
+    symbol = pair
     loader = DataLoader(symbol)
     aligned = loader.load_aligned()
     if aligned.empty:
         raise ValueError(f"No M5 data for {pair}")
+
+    if days > 0:
+        time_col = "time"
+        if time_col in aligned.columns:
+            aligned[time_col] = pd.to_datetime(aligned[time_col])
+            cutoff = aligned[time_col].max() - pd.Timedelta(days=days)
+            before = len(aligned)
+            aligned = aligned[aligned[time_col] >= cutoff].copy()
+            logger.info(f"Filtered to last {days} days: {before} -> {len(aligned)} rows")
+
     aligned["pair"] = pair
     aligned["timeframe"] = PRIMARY_TF
     logger.info(f"Loaded M5 ({len(aligned)} rows) with {len(aligned.columns)} columns")
@@ -80,10 +113,57 @@ def train_m5_model(
     model_manager: ModelManager,
     args: argparse.Namespace,
 ) -> Optional[Dict]:
-    """Train a single model on M5 with multi-TF context features."""
+    """Train a single model on M5 with multi-TF context features.
+    Only saves to disk if OOS validation beats the current best version."""
     start = time.monotonic()
-    logger.info("Preparing M5 training data with M15/M30/H1/H4 context features...")
 
+    # ── Check HOW MANY features will be used (before loading warm-start) ──
+    # We need to know feature count to decide if warm-start is possible
+    available_cols_all = trainer.feature_pipeline.get_feature_columns()
+    old_importance = trainer._load_feature_importance(args.pair or "EURUSD", 5)
+    has_new_features = False
+    if old_importance is not None:
+        new_feats = [c for c in available_cols_all if c not in old_importance]
+        has_new_features = len(new_feats) > 0
+
+    # ── Warm-start: load best existing model untuk continued training ──
+    existing_ensemble = None
+    model_params = None
+    is_warm_start = False
+    if not has_new_features:
+        try:
+            existing_ensemble = model_manager.load_best_ensemble(PRIMARY_TF)
+            if existing_ensemble is not None:
+                # Check feature count compatibility
+                old_n_features = _get_ensemble_feature_count(existing_ensemble)
+                if old_n_features and old_n_features != len(available_cols_all):
+                    logger.info(
+                        f"Warm-start skipped: model trained with {old_n_features} features, "
+                        f"pipeline has {len(available_cols_all)} features"
+                    )
+                    existing_ensemble = None
+                else:
+                    is_warm_start = True
+                    logger.info(
+                        f"Warm-start: loaded best existing ensemble "
+                        f"({existing_ensemble.get_num_models()} models) — "
+                        f"using fine-tuning params (smaller LR, fewer estimators)"
+                    )
+                    model_params = {
+                        "xgboost": {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.01, "subsample": 0.8},
+                        "random_forest": {"n_estimators": 100, "max_depth": 8, "min_samples_split": 10},
+                        "lightgbm": {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.01, "subsample": 0.8},
+                    }
+        except Exception as e:
+            logger.warning(f"Could not load existing ensemble for warm-start: {e}")
+            existing_ensemble = None
+    else:
+        logger.info(
+            f"New features detected ({len(new_feats)} new) — training from scratch "
+            f"to generate proper feature importance"
+        )
+
+    logger.info("Preparing M5 training data with M15/M30/H1/H4 context features...")
     try:
         X, y, features, df_clean = trainer.prepare_training_data(
             df,
@@ -91,6 +171,8 @@ def train_m5_model(
             buy_threshold=args.buy_threshold,
             sell_threshold=args.sell_threshold,
             target_type=args.target_type,
+            pair=args.pair or "EURUSD",
+            timeframe=5,
         )
     except Exception as e:
         logger.error(f"Feature prep failed: {e}")
@@ -104,8 +186,11 @@ def train_m5_model(
         results = trainer.train_all_models(
             X, y,
             feature_cols=features,
+            model_params=model_params,
             target_type=args.target_type,
             recency_weights=recency,
+            tf_label="M5",
+            existing_ensemble=existing_ensemble,
         )
     except Exception as e:
         logger.error(f"Training failed: {e}")
@@ -117,9 +202,84 @@ def train_m5_model(
         logger.warning("No models trained")
         return None
 
-    version = model_manager.save_ensemble(ensemble, timeframe=PRIMARY_TF)
-    logger.info(f"Trained {num_models} models on M5, saved as v{version}")
+    # ── Run OOS validation on the SAME data used for training ──
+    from learning.oos_validator import OOSValidator
+    oos_val = OOSValidator()
 
+    # OOS pada data FULL (sama dengan training)
+    # Threshold HARUS sama dengan training (config: 0.0004)
+    bt = args.buy_threshold if hasattr(args, 'buy_threshold') else config.training["buy_threshold"]
+    st = args.sell_threshold if hasattr(args, 'sell_threshold') else config.training["sell_threshold"]
+    oos_result = oos_val.validate(df, ensemble, trainer, "M5+CTX", oos_split=0.2,
+                                   buy_threshold=bt, sell_threshold=st)
+    new_score = model_manager._compute_oos_numeric_score(oos_result)
+
+    # Compare with current best version — re-evaluasi old model pada data SAMA untuk fair comparison
+    best_ver = model_manager.get_best_version(PRIMARY_TF)
+    old_score = 0
+    if best_ver and is_warm_start:
+        try:
+            old_ensemble = model_manager.load_ensemble(best_ver)
+            if old_ensemble.get_num_models() > 0:
+                oos_val2 = OOSValidator()
+                old_oos = oos_val2.validate(df, old_ensemble, trainer, "M5+CTX", oos_split=0.2,
+                                            buy_threshold=bt, sell_threshold=st)
+                old_score = model_manager._compute_oos_numeric_score(old_oos)
+                logger.info(
+                    f"Re-evaluated {best_ver} on same data: "
+                    f"WR={old_oos.get('win_rate',0):.1f}% PF={old_oos.get('profit_factor',0):.2f} "
+                    f"Score={old_score:.1f}"
+                )
+        except Exception as e:
+            logger.warning(f"Could not re-evaluate old model: {e}")
+            old_score = 0
+    elif best_ver:
+        old_oos = model_manager.get_oos_result(best_ver)
+        old_score = model_manager._compute_oos_numeric_score(old_oos)
+    # ── Save feature importance EVEN IF rejected (so next retrain has data) ──
+    if args.save_fi and best_ver:
+        # Overwrite the best version's feature importance with new data
+        # This ensures new features appear in importance CSV for next retrain
+        try:
+            trainer.save_feature_importance(
+                ensemble, features, args.pair, PRIMARY_TF, best_ver
+            )
+        except Exception as e:
+            logger.debug(f"Feature importance save to {best_ver} skipped: {e}")
+
+    if old_score > 0:
+        better, reason = ModelManager.is_model_better(oos_result, old_oos)
+        if not better:
+            logger.warning(
+                f"New model rejected: {reason}"
+            )
+            logger.info(
+                f"  Best {best_ver}: WR={old_oos.get('win_rate',0):.1f}% PF={old_oos.get('profit_factor',0):.2f} "
+                f"Grade={old_oos.get('grade','N/A')}"
+            )
+            logger.info(
+                f"  New model: WR={oos_result.get('win_rate',0):.1f}% PF={oos_result.get('profit_factor',0):.2f} "
+                f"Grade={oos_result.get('grade','N/A')}"
+            )
+            return None
+        logger.info(f"New model accepted: {reason}")
+
+
+    # Only save if new model beats best (or no best exists yet)
+    version = model_manager.save_ensemble(ensemble, timeframe=PRIMARY_TF)
+    model_manager.save_oos_result(version, oos_result)
+    logger.info(f"Trained {num_models} models on M5, saved as v{version} "
+                f"(OOS score {new_score:.1f} vs best {old_score:.1f})")
+
+    # Save perf data from training
+    perf_data = {"accuracy": {}}
+    for m_name in ["xgboost", "random_forest", "lightgbm"]:
+        m_data = (results.get("models", {}) or {}).get(m_name, {}) or {}
+        perf_data["accuracy"][m_name] = m_data.get("train_accuracy", 0) or 0
+        perf_data["accuracy"][f"{m_name}_val"] = m_data.get("val_accuracy", 0) or 0
+    model_manager.save_performance(version, perf_data)
+
+    # Save feature importance for accepted model (overwrites temp save above)
     if args.save_fi:
         trainer.save_feature_importance(
             ensemble, features, args.pair, PRIMARY_TF, version
@@ -134,6 +294,7 @@ def train_m5_model(
         "features": len(features),
         "ensemble": ensemble,
         "elapsed": round(elapsed, 1),
+        "oos_result": oos_result,
     }
 
 
@@ -164,7 +325,7 @@ def train_pair(args: argparse.Namespace) -> Dict:
     pair = args.pair
     logger.info(f"=== Training {pair}: M5 entry + M15/M30/H1/H4 context ===")
 
-    df = load_m5_with_context(pair)
+    df = load_m5_with_context(pair, days=args.days)
 
     trainer = ModelTrainer()
     model_manager = ModelManager()
@@ -172,8 +333,8 @@ def train_pair(args: argparse.Namespace) -> Dict:
 
     res = train_m5_model(df, trainer, model_manager, args)
     if res is None:
-        logger.error(f"Training failed for {pair}")
-        return {"pair": pair, "success": False, "error": "training failed"}
+        logger.warning(f"Training completed but not saved - not better than existing best for {pair}")
+        return {"pair": pair, "success": False, "error": "not better than existing best"}
 
     ensemble = res.pop("ensemble")
     results["training"] = res

@@ -62,12 +62,13 @@ class AccountMonitor:
 
         total_dd = (peak - equity) / peak
 
-        if total_dd >= 0.05:
+        emerg = config.emergency
+        if total_dd >= emerg["critical_dd"]:
             self._emergency_level = EmergencyLevel.CRITICAL
             self._trading_paused = True
-        elif total_dd >= 0.04:
+        elif total_dd >= emerg["danger_dd"]:
             self._emergency_level = EmergencyLevel.DANGER
-        elif total_dd >= 0.03:
+        elif total_dd >= emerg["caution_dd"]:
             self._emergency_level = EmergencyLevel.CAUTION
         else:
             self._emergency_level = EmergencyLevel.NORMAL
@@ -129,7 +130,7 @@ class AccountMonitor:
             violations.append(f"Daily drawdown limit: {daily_dd:.1f}% >= {max_daily:.1f}%")
 
         total_dd = status.get("total_drawdown", 0)
-        hard_stop = 5.0
+        hard_stop = config.emergency["critical_dd"] * 100
         if total_dd >= hard_stop:
             violations.append(f"Hard stop loss: {total_dd:.1f}% >= {hard_stop:.1f}%")
 
@@ -143,7 +144,7 @@ class AccountMonitor:
         return status.get("daily_drawdown", 0) >= config.risk["max_daily_loss_pct"] * 100
 
     def is_hard_stop_reached(self, status: Dict) -> bool:
-        return status.get("total_drawdown", 0) >= 5.0
+        return status.get("total_drawdown", 0) >= config.emergency["critical_dd"] * 100
 
     def record_trade(self):
         self._daily_trades += 1

@@ -48,9 +48,39 @@ class RandomForestModel:
 
     @safe_execute(default_return=None, raise_on_error=True)
     def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
-              progress_callback=None):
-        if self.model is None:
+              progress_callback=None, init_model=None):
+        """Train Random Forest model.
+        
+        Args:
+            init_model: Optional existing RandomForestClassifier to continue training from (warm-start).
+                        Uses warm_start=True to add more trees to the existing forest.
+        """
+        if init_model is not None:
+            # Warm-start: continue training from existing model by adding more trees
+            self.model = init_model
+            prev_n = init_model.n_estimators
+            additional = max(50, prev_n // 2)  # Add 50% more trees or at least 50
+            # Compute explicit class weights from training data to avoid
+            # sklearn warning about balanced_subsample + warm_start
+            y_classes = np.unique(y_train) if len(y_train) > 0 else np.array([0, 1, 2])
+            from sklearn.utils.class_weight import compute_class_weight
+            cw = compute_class_weight("balanced", classes=y_classes, y=y_train)
+            class_weight_dict = {int(c): float(w) for c, w in zip(y_classes, cw)}
+            self.model.set_params(
+                warm_start=True,
+                n_estimators=prev_n + additional,
+                oob_score=True,
+                class_weight=class_weight_dict,
+            )
+            self._trained = True
+            self.logger.info(
+                f"Random Forest warm-start: continuing from existing model "
+                f"(n_estimators: {prev_n} → {prev_n + additional}, "
+                f"class_weight=computed)"
+            )
+        elif self.model is None:
             self.create_model()
+            
         fit_kwargs = {}
         if sample_weight is not None:
             fit_kwargs["sample_weight"] = sample_weight

@@ -47,13 +47,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def _resolve_symbol(mt5, symbol: str) -> str:
-    if mt5.symbol_select(symbol, True):
-        return symbol
-    alt = f"{symbol}.fl"
-    if not symbol.endswith(".fl") and mt5.symbol_select(alt, True):
-        logger.info(f"  Symbol '{symbol}' not found, using '{alt}'")
-        return alt
-    return symbol
+    from data.mt5_connector import MT5Connector
+    connector = MT5Connector()
+    return connector.resolve_symbol(symbol)
 
 
 def _download_tf(
@@ -136,7 +132,7 @@ def download_and_save(
     from_date = datetime(from_year, 1, 1)
     to_date = datetime.now()
 
-    symbol = _resolve_symbol(connector._mt5, symbol)
+    symbol = _resolve_symbol(None, symbol)
 
     logger.info(f"\n{'='*60}")
     logger.info(f"Downloading {symbol} since {from_year}")

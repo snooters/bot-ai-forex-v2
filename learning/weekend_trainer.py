@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from core.constants import MODEL_DIR, DATA_DIR, Timeframe
-from core.config import Config
+from core.config import Config, config
 from ml.model_manager import ModelManager
 from ml.ensemble import VotingEnsemble
 from ml.xgboost_model import XGBoostModel
@@ -16,6 +16,7 @@ from ml.random_forest_model import RandomForestModel
 from ml.lightgbm_model import LightGBMModel
 from learning.trade_memory import TradeMemory
 from learning.oos_validator import OOSValidator
+from ml.trainer import ModelTrainer
 from learning.concept_drift import ConceptDriftDetector
 from learning.skill_scorer import SkillScorer
 from utils.logger import get_logger
@@ -86,8 +87,13 @@ class WeekendTrainer:
         return results
 
     def _get_timeframes_to_train(self) -> List[int]:
-        config_tfs = self.config.get("timeframes", [5, 15, 30])
-        return config_tfs
+        tf_strings = self.config.trading.get("timeframes", ["M5", "M15", "M30"])
+        return [self._tf_to_minutes(tf) for tf in tf_strings]
+
+    @staticmethod
+    def _tf_to_minutes(tf: str) -> int:
+        mapping = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240}
+        return mapping.get(tf.upper(), 15)
 
     def _tf_label(self, timeframe: int) -> str:
         return Timeframe.LABELS.get(timeframe, f"tf{timeframe}")
@@ -105,15 +111,38 @@ class WeekendTrainer:
 
         if trade_features is not None:
             X_train = np.vstack([X_train, trade_features])
-            y_train = np.hstack([y_train, np.ones(len(trade_features))])
+            y_train = np.hstack([y_train, np.zeros(len(trade_features))])  # BUY=0
+
+        # ── Warm-start: load best existing model for continued training ──
+        existing_ensemble = None
+        try:
+            existing_ensemble = self.model_manager.load_best_ensemble(timeframe)
+            if existing_ensemble is not None:
+                self.logger.info(
+                    f"Weekend warm-start: loaded best existing ensemble for tf{timeframe} "
+                    f"({existing_ensemble.get_num_models()} models)"
+                )
+            else:
+                self.logger.info(f"No existing model for tf{timeframe} — training from scratch")
+        except Exception as e:
+            self.logger.warning(f"Could not load existing ensemble for warm-start: {e}")
+            existing_ensemble = None
 
         ensemble = VotingEnsemble()
         models_to_train = self._get_available_models()
         model_results = {}
         for name, model_class in models_to_train:
             try:
+                # Load existing model for warm-start if available
+                init_model = None
+                if existing_ensemble is not None and name in existing_ensemble.models:
+                    existing_model = existing_ensemble.models[name]
+                    if existing_model.is_trained:
+                        init_model = existing_model.model
+                        self.logger.info(f"{name}: weekend warm-start from existing model")
+
                 model = model_class()
-                result = model.train(X_train, y_train, X_val, y_val)
+                result = model.train(X_train, y_train, X_val, y_val, init_model=init_model)
                 model_results[name] = result
                 ensemble.register_model(name, model)
                 self.logger.info(f"Trained {name} for tf{timeframe}")
@@ -217,25 +246,34 @@ class WeekendTrainer:
                 self.logger.warning(f"Too few samples for tf{timeframe}: {len(features)}")
                 return None, None, None, None, None
 
-            # Balanced sampling: equal buy/sell representation
-            buy_idx = np.where(target == 1)[0]
-            sell_idx = np.where(target == 0)[0]
-            n_min = min(len(buy_idx), len(sell_idx))
+            # Balanced sampling: equal BUY/SELL/HOLD representation
+            buy_idx = np.where(target == 0)[0]
+            sell_idx = np.where(target == 1)[0]
+            hold_idx = np.where(target == 2)[0]
+            n_min = min(len(buy_idx), len(sell_idx), len(hold_idx))
 
-            if len(buy_idx) != len(sell_idx):
-                if len(buy_idx) > len(sell_idx):
-                    step = len(buy_idx) / n_min
-                    buy_sub = np.linspace(0, len(buy_idx) - 1, n_min, dtype=int)
-                    selected = np.sort(np.concatenate([buy_idx[buy_sub], sell_idx]))
-                else:
-                    step = len(sell_idx) / n_min
-                    sell_sub = np.linspace(0, len(sell_idx) - 1, n_min, dtype=int)
-                    selected = np.sort(np.concatenate([buy_idx, sell_idx[sell_sub]]))
-                X_bal = features[selected]
-                y_bal = target[selected]
+            if len(buy_idx) > n_min:
+                step = len(buy_idx) / n_min
+                buy_sub = np.linspace(0, len(buy_idx) - 1, n_min, dtype=int)
+                buy_selected = buy_idx[buy_sub]
             else:
-                X_bal = features
-                y_bal = target
+                buy_selected = buy_idx
+            if len(sell_idx) > n_min:
+                step = len(sell_idx) / n_min
+                sell_sub = np.linspace(0, len(sell_idx) - 1, n_min, dtype=int)
+                sell_selected = sell_idx[sell_sub]
+            else:
+                sell_selected = sell_idx
+            if len(hold_idx) > n_min:
+                step = len(hold_idx) / n_min
+                hold_sub = np.linspace(0, len(hold_idx) - 1, n_min, dtype=int)
+                hold_selected = hold_idx[hold_sub]
+            else:
+                hold_selected = hold_idx
+
+            selected = np.sort(np.concatenate([buy_selected, sell_selected, hold_selected]))
+            X_bal = features[selected]
+            y_bal = target[selected]
 
             split_idx = int(len(X_bal) * 0.7)
             val_split = int(len(X_bal) * 0.85)
@@ -260,7 +298,8 @@ class WeekendTrainer:
 
     def _load_historical_data(self, timeframe: int) -> Optional[pd.DataFrame]:
         tf_label = self._tf_label(timeframe)
-        pair = self.config.get("symbol", "EURUSD.fl")
+        pairs = self.config.trading.get("pairs", ["EURUSD"])
+        pair = pairs[0] if pairs else "EURUSD"
         data_path = (
             Path(DATA_DIR)
             / "historical"
@@ -293,15 +332,29 @@ class WeekendTrainer:
             return np.array([])
 
     def _compute_target(self, df: pd.DataFrame) -> np.ndarray:
-        if "returns" in df.columns:
-            return (df["returns"].shift(-1) > 0).astype(int).values[:-1]
+        """3-class target: BUY=0, SELL=1, HOLD=2 — konsisten dengan main pipeline.
+        Threshold 0.001 (10 pips) = sama dengan OOS validator dan ModelTrainer.
+        """
+        from core.config import config as _cfg
+        from core.constants import LOOKAHEAD_5
+        lookahead = LOOKAHEAD_5
+        buy_threshold = _cfg.training["buy_threshold"]   # default 0.0004
+        sell_threshold = _cfg.training["sell_threshold"]  # default 0.0004
+
         if "close" in df.columns:
             close = df["close"].values
-            future_close = close[1:]
-            current_close = close[:-1]
-            target = (future_close > current_close).astype(int)
+            future_close = np.roll(close, -lookahead)
+            # Last `lookahead` bars can't compute target
+            future_return = np.full(len(close), np.nan)
+            future_return[:-lookahead] = (future_close[:-lookahead] - close[:-lookahead]) / close[:-lookahead]
+
+            target = np.full(len(close), 2, dtype=int)  # default HOLD
+            target[future_return > buy_threshold] = 0    # BUY
+            target[future_return < -sell_threshold] = 1  # SELL
+            # Keep last lookahead bars as HOLD (no future data)
+            target[-lookahead:] = 2
             return target
-        return np.zeros(len(df))
+        return np.full(len(df), 2, dtype=int)
 
     def _extract_trade_features(self, trades: List[Dict]) -> Optional[np.ndarray]:
         if not trades:
@@ -342,7 +395,22 @@ class WeekendTrainer:
 
     def _validate_oos(self, ensemble: VotingEnsemble, timeframe: int, X_val: np.ndarray, y_val: np.ndarray) -> Dict:
         try:
-            oos_results = self.oos_validator.validate(ensemble, self._load_historical_data(timeframe), timeframe)
+            df = self._load_historical_data(timeframe)
+            if df is None or df.empty:
+                return {"success": False, "error": "No historical data for OOS", "grade": "N/A"}
+            trainer = ModelTrainer()
+            tf_label = self._tf_label(timeframe)
+            _bt = config.training["buy_threshold"]
+            _st = config.training["sell_threshold"]
+            oos_results = self.oos_validator.validate(
+                df=df,
+                ensemble=ensemble,
+                trainer=trainer,
+                timeframe_label=tf_label,
+                oos_split=0.2,
+                buy_threshold=_bt,
+                sell_threshold=_st,
+            )
             return oos_results
         except Exception as e:
             self.logger.warning(f"OOS validation failed: {e}")

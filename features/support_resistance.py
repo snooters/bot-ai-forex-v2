@@ -12,14 +12,19 @@ class SupportResistanceEngine:
         self.logger = get_logger("support_resistance")
 
     def _find_extrema(self, high: pd.Series, low: pd.Series) -> Tuple[List[int], List[int]]:
-        highs_idx = []
-        lows_idx = []
+        w = self.window
+        roll_window = 2 * w + 1
 
-        for i in range(self.window, len(high) - self.window):
-            if high.iloc[i] == high.iloc[i - self.window:i + self.window + 1].max():
-                highs_idx.append(i)
-            if low.iloc[i] == low.iloc[i - self.window:i + self.window + 1].min():
-                lows_idx.append(i)
+        high_rolling_max = high.rolling(window=roll_window, center=False, min_periods=1).max()
+        low_rolling_min = low.rolling(window=roll_window, center=False, min_periods=1).min()
+
+        is_high = (high == high_rolling_max) & high.notna()
+        is_low = (low == low_rolling_min) & low.notna()
+
+        start = w
+        end = len(high) - w
+        highs_idx = [i for i in range(start, end) if is_high.iloc[i]]
+        lows_idx = [i for i in range(start, end) if is_low.iloc[i]]
 
         return highs_idx, lows_idx
 
@@ -136,35 +141,34 @@ class SupportResistanceEngine:
         if df.empty or len(df) < lookback:
             return {"supply_zones": [], "demand_zones": []}
 
-        close = df["close"]
-        high = df["high"]
-        low = df["low"]
+        high = df["high"].values
+        low = df["low"].values
+        close = df["close"].values
+        n = min(lookback, len(df) - 1)
+
+        supply_mask = (high[2:n] > high[1:n-1]) & (high[2:n] > high[3:n+1])
+        demand_mask = (low[2:n] < low[1:n-1]) & (low[2:n] < low[3:n+1])
+
+        supply_indices = np.where(supply_mask)[0] + 2
+        demand_indices = np.where(demand_mask)[0] + 2
 
         supply_zones = []
+        for i in supply_indices:
+            base = min(close[i - 1], close[i + 1])
+            supply_zones.append({
+                "top": high[i],
+                "bottom": base,
+                "strength": 0.5,
+            })
+
         demand_zones = []
-
-        for i in range(2, min(lookback, len(df) - 1)):
-            if (
-                high.iloc[i] > high.iloc[i - 1] and
-                high.iloc[i] > high.iloc[i + 1]
-            ):
-                base = min(close.iloc[i - 1], close.iloc[i + 1])
-                supply_zones.append({
-                    "top": high.iloc[i],
-                    "bottom": base,
-                    "strength": 0.5,
-                })
-
-            if (
-                low.iloc[i] < low.iloc[i - 1] and
-                low.iloc[i] < low.iloc[i + 1]
-            ):
-                top = max(close.iloc[i - 1], close.iloc[i + 1])
-                demand_zones.append({
-                    "top": top,
-                    "bottom": low.iloc[i],
-                    "strength": 0.5,
-                })
+        for i in demand_indices:
+            top = max(close[i - 1], close[i + 1])
+            demand_zones.append({
+                "top": top,
+                "bottom": low[i],
+                "strength": 0.5,
+            })
 
         return {
             "supply_zones": supply_zones,

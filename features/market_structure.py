@@ -12,17 +12,19 @@ class MarketStructureEngine:
         self.logger = get_logger("market_structure")
 
     def _find_pivots(self, high: pd.Series, low: pd.Series) -> Tuple[pd.Series, pd.Series]:
-        highs = high.copy()
-        lows = low.copy()
+        w = self.lookback
+        roll_window = 2 * w + 1
 
-        pivot_high = pd.Series(False, index=highs.index)
-        pivot_low = pd.Series(False, index=lows.index)
+        high_rolling_max = high.rolling(window=roll_window, center=False, min_periods=1).max()
+        low_rolling_min = low.rolling(window=roll_window, center=False, min_periods=1).min()
 
-        for i in range(self.lookback, len(highs) - self.lookback):
-            if highs.iloc[i] == highs.iloc[i - self.lookback:i + self.lookback + 1].max():
-                pivot_high.iloc[i] = True
-            if lows.iloc[i] == lows.iloc[i - self.lookback:i + self.lookback + 1].min():
-                pivot_low.iloc[i] = True
+        pivot_high = (high == high_rolling_max) & high.notna()
+        pivot_low = (low == low_rolling_min) & low.notna()
+
+        pivot_high.iloc[:w] = False
+        pivot_high.iloc[-w:] = False
+        pivot_low.iloc[:w] = False
+        pivot_low.iloc[-w:] = False
 
         return pivot_high, pivot_low
 
@@ -114,10 +116,14 @@ class MarketStructureEngine:
     def get_current_structure(self, df: pd.DataFrame) -> str:
         if "market_structure" not in df.columns:
             return MarketStructure.UNDEFINED.value
-        recent = df["market_structure"].dropna().tail(10)
+        defined = MarketStructure.UNDEFINED.value
+        recent = df["market_structure"].dropna().tail(50)
         if recent.empty:
             return MarketStructure.UNDEFINED.value
-        value_counts = recent.value_counts()
+        filtered = recent[recent != defined]
+        if filtered.empty:
+            return MarketStructure.UNDEFINED.value
+        value_counts = filtered.value_counts()
         if value_counts.empty:
             return MarketStructure.UNDEFINED.value
         return value_counts.index[0]

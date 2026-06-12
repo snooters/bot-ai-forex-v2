@@ -40,7 +40,7 @@ class VotingEnsemble:
             try:
                 proba = model.predict_proba(X)
                 weight = self.weights.get(name, 1.0)
-                weighted_probas.append(proba * weight)
+                weighted_probas.append((proba, weight, name))
                 total_weight += weight
             except Exception as e:
                 self.logger.warning(f"Model {name} prediction failed: {e}")
@@ -49,7 +49,25 @@ class VotingEnsemble:
         if not weighted_probas:
             raise ModelError("No models could make predictions")
 
-        ensemble_proba = np.sum(weighted_probas, axis=0) / total_weight
+        n_samples = X.shape[0] if X.ndim > 1 else 1
+        n_classes = 3
+
+        aligned = []
+        for proba, weight, name in weighted_probas:
+            if proba.shape[0] == 1 and n_samples > 1:
+                proba = np.repeat(proba, n_samples, axis=0)
+            elif proba.shape[0] != n_samples:
+                self.logger.warning(
+                    f"Model {name} returned shape {proba.shape}, expected ({n_samples}, {n_classes}). Skipping."
+                )
+                total_weight -= weight
+                continue
+            aligned.append(proba * weight)
+
+        if not aligned:
+            raise ModelError("No models produced valid predictions")
+
+        ensemble_proba = np.sum(aligned, axis=0) / total_weight
         return ensemble_proba
 
     def predict(self, X: np.ndarray) -> np.ndarray:

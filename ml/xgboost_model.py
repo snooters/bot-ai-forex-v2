@@ -54,9 +54,21 @@ class XGBoostModel:
 
     @safe_execute(default_return=None, raise_on_error=True)
     def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
-              progress_callback=None):
-        if self.model is None:
+              progress_callback=None, init_model=None):
+        """Train XGBoost model.
+        
+        Args:
+            init_model: Optional existing XGBClassifier or Booster to continue training from (warm-start).
+                        If provided, training continues from this model's state.
+        """
+        if init_model is not None:
+            # Warm-start: continue training from existing model
+            self.model = init_model
+            self._trained = True
+            self.logger.info("XGBoost warm-start: continuing from existing model")
+        elif self.model is None:
             self.create_model()
+            
         if progress_callback is not None:
             try:
                 from xgboost.callback import TrainingCallback
@@ -73,6 +85,13 @@ class XGBoostModel:
         fit_kwargs = {"eval_set": eval_set, "verbose": False}
         if sample_weight is not None:
             fit_kwargs["sample_weight"] = sample_weight
+        if init_model is not None:
+            # Pass the booster for continued training
+            try:
+                fit_kwargs["xgb_model"] = self.model.get_booster()
+                self.logger.info("XGBoost continued training with xgb_model parameter")
+            except Exception as e:
+                self.logger.warning(f"XGBoost warm-start: could not get booster, falling back: {e}")
         self.model.fit(X_train, y_train, **fit_kwargs)
         self.model.callbacks = None
         self._trained = True

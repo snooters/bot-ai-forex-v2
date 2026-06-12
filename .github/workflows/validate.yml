@@ -53,3 +53,8 @@ from ml.model_manager import ModelManager
 from ml.ensemble import VotingEnsemble
 print('All imports OK')
 "
+
+      - name: Run tests
+        run: |
+          pip install pytest pytest-mock
+          python -m pytest tests/ -v --tb=short

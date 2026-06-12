@@ -26,6 +26,26 @@ class DecisionEngine:
         self.confidence_calculator = ConfidenceCalculator()
         self.no_trade_engine = NoTradeEngine()
         self._last_decision: Optional[Dict] = None
+        self._regime_classifier = None
+
+    def _init_regime_classifier(self):
+        if self._regime_classifier is not None:
+            return
+        try:
+            from analysis.regime_classifier import RegimeClassifier
+            self._regime_classifier = RegimeClassifier()
+        except Exception as e:
+            self.logger.debug(f"RegimeClassifier not available: {e}")
+
+    def _classify_regime(self, df) -> Optional[Dict]:
+        self._init_regime_classifier()
+        if self._regime_classifier is None:
+            return None
+        try:
+            return self._regime_classifier.classify(df)
+        except Exception as e:
+            self.logger.warning(f"Regime classification failed: {e}")
+            return None
 
     def make_decision(
         self,
@@ -46,6 +66,7 @@ class DecisionEngine:
         consensus: Optional[Dict] = None,
         reversal_info: Optional[Dict] = None,
         multi_tf_trends: Optional[Dict] = None,
+        pair_skill_score: Optional[float] = None,
     ) -> Dict:
         entry_tfs = list(df_entry.keys()) if isinstance(df_entry, dict) else []
         entry_tf = timeframe or (entry_tfs[0] if entry_tfs else Timeframe.M15)
@@ -92,6 +113,11 @@ class DecisionEngine:
                 ml_signal = self.ml_predictor.get_buy_sell_hold(df, timeframe=entry_tf)
             decision["ml_signal"] = ml_signal
 
+            new_regime = self._classify_regime(df)
+            if new_regime is not None:
+                regime_result = new_regime
+                decision["regime_classifier"] = new_regime.get("regime")
+
             market_score = self.market_scorer.compute_market_score(
                 trend_result, vol_result, momentum_result,
                 regime_result, sr_info, feature_summary
@@ -106,10 +132,20 @@ class DecisionEngine:
                 sr_info=sr_info,
                 news_analysis=news_analysis,
                 llm_analysis=llm_analysis,
+                pair_skill_score=pair_skill_score,
             )
             decision["confidence"] = confidence
 
+            if confidence == 0.0 and regime_result.get("regime") in ("NEWS_SHOCK",):
+                decision["no_trade"] = True
+                decision["no_trade_reasons"].append("NEWS_SHOCK regime — no trading")
+                decision["reasons"].append("Blocked by NEWS_SHOCK regime")
+                self._last_decision = decision
+                return decision
+
             balance = (account_info or {}).get("balance", 0)
+            trend_dir = trend_result.get("direction", "SIDEWAYS")
+            ml_signal_dir = ml_signal.get("signal", "HOLD")
 
             no_trade_severity = self.no_trade_engine.should_no_trade(
                 confidence=confidence,
@@ -120,10 +156,8 @@ class DecisionEngine:
                 existing_positions=positions,
                 balance=balance,
                 trend_result=trend_result,
+                signal=ml_signal_dir,
             )
-
-            trend_dir = trend_result.get("direction", "SIDEWAYS")
-            ml_signal_dir = ml_signal.get("signal", "HOLD")
             buy_prob = ml_signal.get("buy_prob", 0)
             sell_prob = ml_signal.get("sell_prob", 0)
             hold_prob = ml_signal.get("hold_prob", 0)
@@ -180,18 +214,31 @@ class DecisionEngine:
                         f"Below threshold: conf={confidence:.1%} < {min_conf:.0%})"
                     )
             else:
-                intelligence_weight = INTELLIGENCE_WEIGHT * market_score / 100.0
+                intel_base = market_score / 100.0
+                buy_boost = intel_base
+                sell_boost = 1.0 - intel_base
                 combined_buy = (
                     ml_signal.get("buy_prob", 0) * ML_WEIGHT +
-                    intelligence_weight * 100 * INTELLIGENCE_WEIGHT
+                    buy_boost * INTELLIGENCE_WEIGHT
                 )
                 combined_sell = (
                     ml_signal.get("sell_prob", 0) * ML_WEIGHT +
-                    intelligence_weight * 100 * INTELLIGENCE_WEIGHT
+                    sell_boost * INTELLIGENCE_WEIGHT
                 )
 
-                if combined_buy > combined_sell and combined_buy >= min_conf:
-                    if self._validate_entry(direction="BUY", confidence=confidence,
+                counter_trend_min_conf = config.ai_filter.get("counter_trade_min_confidence", 0.60)
+
+                if combined_buy > combined_sell:
+                    # ── Counter-trade filter: BUY when M5 trend is bearish (non-STRONG) ──
+                    # STRONG_BEARISH skipped here — handled by trend override later
+                    if trend_dir in ("BEARISH", "WEAK_BEARISH") and confidence < counter_trend_min_conf:
+                        decision["action"] = TradeDirection.HOLD.value
+                        decision["no_trade"] = True
+                        decision["no_trade_reasons"].append(
+                            f"Counter-trade BUY blocked: trend={trend_dir}, conf={confidence:.0%} < {counter_trend_min_conf:.0%}"
+                        )
+                        decision["reasons"].append(f"Counter-trade BUY needs ≥{counter_trend_min_conf:.0%} conf (got {confidence:.0%})")
+                    elif self._validate_entry(direction="BUY", confidence=confidence,
                                              trend_result=trend_result, sr_info=sr_info, df=df):
                         decision["action"] = TradeDirection.BUY.value
                         decision["no_trade"] = False
@@ -207,8 +254,17 @@ class DecisionEngine:
                         if direction_bias:
                             decision["reasons"].append(f"BUY validation failed, weak {direction_bias} bias")
 
-                elif combined_sell > combined_buy and combined_sell >= min_conf:
-                    if self._validate_entry(direction="SELL", confidence=confidence,
+                elif combined_sell > combined_buy:
+                    # ── Counter-trade filter: SELL when M5 trend is bullish (non-STRONG) ──
+                    # STRONG_BULLISH skipped here — handled by trend override later
+                    if trend_dir in ("BULLISH", "WEAK_BULLISH") and confidence < counter_trend_min_conf:
+                        decision["action"] = TradeDirection.HOLD.value
+                        decision["no_trade"] = True
+                        decision["no_trade_reasons"].append(
+                            f"Counter-trade SELL blocked: trend={trend_dir}, conf={confidence:.0%} < {counter_trend_min_conf:.0%}"
+                        )
+                        decision["reasons"].append(f"Counter-trade SELL needs ≥{counter_trend_min_conf:.0%} conf (got {confidence:.0%})")
+                    elif self._validate_entry(direction="SELL", confidence=confidence,
                                              trend_result=trend_result, sr_info=sr_info, df=df):
                         decision["action"] = TradeDirection.SELL.value
                         decision["no_trade"] = False
@@ -226,7 +282,7 @@ class DecisionEngine:
                 else:
                     decision["action"] = TradeDirection.HOLD.value
                     decision["no_trade"] = True
-                    decision["no_trade_reasons"].append("Combined signal below min confidence")
+                    decision["no_trade_reasons"].append("Combined signal equal - HOLD")
 
             # ── Trend-based direction override ──
             if not decision["no_trade"]:
@@ -235,11 +291,11 @@ class DecisionEngine:
                 if trend_dir == TrendDirection.STRONG_BULLISH.value:
                     if current_action in (TradeDirection.HOLD.value, TradeDirection.SELL.value):
                         decision["action"] = TradeDirection.BUY.value
-                        decision["reasons"].append(f"Trend override: STRONG_BULLISH → BUY")
+                        decision["reasons"].append("Trend override: STRONG_BULLISH -> BUY")
                 elif trend_dir == TrendDirection.STRONG_BEARISH.value:
                     if current_action in (TradeDirection.HOLD.value, TradeDirection.BUY.value):
                         decision["action"] = TradeDirection.SELL.value
-                        decision["reasons"].append(f"Trend override: STRONG_BEARISH → SELL")
+                        decision["reasons"].append("Trend override: STRONG_BEARISH -> SELL")
 
             # ── RSI + MACD safety override ──
             if not decision["no_trade"]:
@@ -266,34 +322,48 @@ class DecisionEngine:
                         decision["reasons"].append("RSI+MACD safety override")
 
             # ── Multi-TF trend alignment filter ──
+            # H4, H1, M30, M15 = context TFs
+            # M5  = Entry (primary)
+            # Require >= 3 of 4 context TFs to agree with signal direction
             if multi_tf_trends and not decision["no_trade"]:
                 h4 = multi_tf_trends.get("trend240", 0)
                 h1 = multi_tf_trends.get("trend60", 0)
                 m30 = multi_tf_trends.get("trend30", 0)
+                m15 = multi_tf_trends.get("trend15", 0)
                 current_action = decision.get("action", TradeDirection.HOLD.value)
 
+                tf_values = [("H4", h4), ("H1", h1), ("M30", m30), ("M15", m15)]
+
                 if current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
-                    if h4 < 0 or h1 < 0 or m30 < 0:
+                    agree = sum(1 for _, v in tf_values if v > 0)
+                    disagree = sum(1 for _, v in tf_values if v < 0)
+                    if agree < 3 and disagree >= 2:
                         decision["action"] = TradeDirection.HOLD.value
                         decision["no_trade"] = True
-                        violating = [k for k, v in [("H4",h4),("H1",h1),("M30",m30)] if v < 0]
+                        detail = " ".join(f"{k}={v:+d}" for k, v in tf_values)
                         decision["no_trade_reasons"].append(
-                            f"MTF filter: BUY blocked by {'/'.join(violating)} trend"
+                            f"MTF filter: BUY blocked (agree={agree}/4, disagree={disagree})"
                         )
+                        decision["reasons"].append(f"MTF filter: BUY->HOLD ({detail})")
+                    elif agree < 3:
                         decision["reasons"].append(
-                            f"MTF filter: BUY→HOLD (H4={h4:+d} H1={h1:+d} M30={m30:+d})"
+                            f"MTF note: only {agree}/4 TFs bullish"
                         )
 
                 elif current_action in (TradeDirection.SELL.value, "WEAK_SELL"):
-                    if h4 > 0 or h1 > 0 or m30 > 0:
+                    agree = sum(1 for _, v in tf_values if v < 0)
+                    disagree = sum(1 for _, v in tf_values if v > 0)
+                    if agree < 3 and disagree >= 2:
                         decision["action"] = TradeDirection.HOLD.value
                         decision["no_trade"] = True
-                        violating = [k for k, v in [("H4",h4),("H1",h1),("M30",m30)] if v > 0]
+                        detail = " ".join(f"{k}={v:+d}" for k, v in tf_values)
                         decision["no_trade_reasons"].append(
-                            f"MTF filter: SELL blocked by {'/'.join(violating)} trend"
+                            f"MTF filter: SELL blocked (agree={agree}/4, disagree={disagree})"
                         )
+                        decision["reasons"].append(f"MTF filter: SELL->HOLD ({detail})")
+                    elif agree < 3:
                         decision["reasons"].append(
-                            f"MTF filter: SELL→HOLD (H4={h4:+d} H1={h1:+d} M30={m30:+d})"
+                            f"MTF note: only {agree}/4 TFs bearish"
                         )
 
             # ── Trend alignment enforcement from multi-TF consensus ──
@@ -421,7 +491,7 @@ class DecisionEngine:
             atr = df["atr"].iloc[-1]
             if atr > 0:
                 atr_pct = atr / df["close"].iloc[-1]
-                if atr_pct > 0.02:
+                if atr_pct > config.risk.get("max_atr_pct", 0.02):
                     return False
 
         return True

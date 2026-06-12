@@ -55,9 +55,21 @@ class LightGBMModel:
 
     @safe_execute(default_return=None, raise_on_error=True)
     def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
-              progress_callback=None):
-        if self.model is None:
+              progress_callback=None, init_model=None):
+        """Train LightGBM model.
+        
+        Args:
+            init_model: Optional existing LGBMClassifier to continue training from (warm-start).
+                        If provided, training continues from this model's state.
+        """
+        if init_model is not None:
+            # Warm-start: continue training from existing model
+            self.model = init_model
+            self._trained = True
+            self.logger.info("LightGBM warm-start: continuing from existing model")
+        elif self.model is None:
             self.create_model()
+            
         _X_train = X_train
         _X_val = X_val
         if not isinstance(X_train, pd.DataFrame):
@@ -69,6 +81,13 @@ class LightGBMModel:
         if _X_val is not None and y_val is not None:
             eval_set.append((_X_val, y_val))
         fit_kwargs = {"eval_set": eval_set}
+        if init_model is not None:
+            # Pass existing booster for continued training
+            try:
+                fit_kwargs["init_model"] = self.model.booster_
+                self.logger.info("LightGBM continued training with init_model parameter")
+            except Exception as e:
+                self.logger.warning(f"LightGBM warm-start: could not get booster, falling back: {e}")
         if sample_weight is not None:
             fit_kwargs["sample_weight"] = sample_weight
         if progress_callback is not None:

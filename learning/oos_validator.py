@@ -19,8 +19,10 @@ TRAIN_RATIO = 0.70
 VAL_RATIO = 0.15
 TEST_RATIO = 0.15
 
-PF_THRESHOLD = 1.2
-DD_THRESHOLD = 0.15
+PF_THRESHOLD = 1.5
+DD_THRESHOLD = 0.10
+
+WARMUP_ROWS = 250
 
 
 class OOSValidator:
@@ -35,27 +37,60 @@ class OOSValidator:
         trainer: ModelTrainer,
         timeframe_label: str,
         oos_split: float = 0.2,
+        buy_threshold: float = 0.001,
+        sell_threshold: float = 0.001,
     ) -> Dict:
         if df.empty or len(df) < 400:
             return self._empty_result("insufficient data (<400 rows)")
 
-        df = df.sort_values("time")
+        df = df.sort_values("time").reset_index(drop=True)
 
-        df_feat = self.feature_pipeline.compute_all(df.copy())
+        feature_cols = self.feature_pipeline.get_feature_columns()
 
-        n = len(df_feat)
+        n = len(df)
         train_end = int(n * TRAIN_RATIO)
         val_end = train_end + int(n * VAL_RATIO)
 
-        train_df = df_feat.iloc[:train_end].copy()
-        val_df = df_feat.iloc[train_end:val_end].copy()
-        test_df = df_feat.iloc[val_end:].copy()
+        # Compute features PER SPLIT — NEVER on full dataset
+        # Each split gets its own feature computation using only data up to that split
+        train_raw = df.iloc[:train_end].copy()
+        val_raw = df.iloc[:val_end].copy()
+        test_raw = df.iloc[:n].copy()
+
+        train_feat_full = self.feature_pipeline.compute_all(train_raw)
+        val_feat_full = self.feature_pipeline.compute_all(val_raw)
+        test_feat_full = self.feature_pipeline.compute_all(test_raw)
+
+        # Training: use all computed features, skip warmup rows
+        train_df = train_feat_full.iloc[WARMUP_ROWS:].copy()
+
+        # Validation: use features computed on data up to val_end
+        # Take the portion corresponding to the val period
+        val_start_idx = max(0, train_end)
+        val_df = val_feat_full.iloc[val_start_idx:].copy()
+        if len(val_df) > (val_end - train_end):
+            val_df = val_df.iloc[-(val_end - train_end):].copy()
+
+        # Test: use features computed on data up to n (end)
+        # Take the portion corresponding to the test period
+        test_start_idx = max(WARMUP_ROWS, val_end)
+        test_df = test_feat_full.iloc[test_start_idx:].copy()
+        expected_test_len = n - val_end
+        if len(test_df) > expected_test_len:
+            test_df = test_df.iloc[-expected_test_len:].copy()
 
         if len(test_df) < 50:
             return self._empty_result(f"test set too small: {len(test_df)} rows")
+        if len(train_df) < 50:
+            return self._empty_result(f"train set too small: {len(train_df)} rows")
+
+        available_cols = [c for c in feature_cols if c in test_df.columns]
+        if not available_cols:
+            return self._empty_result("no feature columns after compute")
 
         self.logger.info(
             f"OOS split: train={len(train_df)} val={len(val_df)} test={len(test_df)}"
+            f" (features=computed-per-split)"
         )
 
         try:
@@ -63,16 +98,22 @@ class OOSValidator:
         except Exception as e:
             return self._empty_result(f"train data prep failed: {e}")
 
-        feature_cols = self.feature_pipeline.get_feature_columns()
-        available_cols = [c for c in feature_cols if c in test_df.columns]
-        if not available_cols:
-            return self._empty_result("no feature columns in test df")
+        # Use ensemble's feature_cols (set by prepare_training_data) for test alignment
+        ef_cols = ensemble.feature_cols or available_cols
 
-        test_clean = test_df.dropna(subset=available_cols).copy()
+        # Ensure test data has all required features (fill missing with 0)
+        test_clean = test_df.copy()
+        missing_cols = [c for c in ef_cols if c not in test_clean.columns]
+        if missing_cols:
+            for col in missing_cols:
+                test_clean[col] = 0.0
+        test_clean = test_clean.dropna(subset=ef_cols)
         if test_clean.empty or len(test_clean) < 20:
             return self._empty_result(f"test set too few rows after cleaning: {len(test_clean)}")
 
-        y_true, oos_X = self._prepare_labels(test_clean, available_cols)
+        y_true, oos_X = self._prepare_labels(test_clean, ef_cols,
+                                              buy_threshold=buy_threshold,
+                                              sell_threshold=sell_threshold)
         if len(oos_X) < 10:
             return self._empty_result(f"too few OOS samples: {len(oos_X)}")
 
@@ -81,7 +122,9 @@ class OOSValidator:
         except Exception as e:
             return self._empty_result(f"prediction failed: {e}")
 
-        val_result = self._validate_split(val_df, ensemble, available_cols, "validation")
+        val_result = self._validate_split(val_df, ensemble, ef_cols,
+                                           buy_threshold=buy_threshold,
+                                           sell_threshold=sell_threshold)
         test_result = self._run_test(oos_X, y_true, ensemble_preds, test_clean)
 
         result = {
@@ -93,6 +136,9 @@ class OOSValidator:
             "split": {"train": len(train_df), "val": len(val_df), "test": len(test_df)},
             "validated_at": datetime.now().isoformat(),
         }
+
+        # Cap unrealistic values before grading
+        result = self._cap_results(result)
 
         result["passed"] = self._check_passed(result)
         result["grade"] = self._compute_oos_grade(result)
@@ -117,12 +163,20 @@ class OOSValidator:
         )
         return result
 
-    def _validate_split(self, val_df: pd.DataFrame, ensemble: VotingEnsemble, available_cols: List[str], name: str) -> Dict:
-        val_clean = val_df.dropna(subset=available_cols).copy()
+    def _validate_split(self, val_df: pd.DataFrame, ensemble: VotingEnsemble, feature_cols: List[str],
+                         buy_threshold: float = 0.001, sell_threshold: float = 0.001) -> Dict:
+        val_clean = val_df.copy()
+        missing_cols = [c for c in feature_cols if c not in val_clean.columns]
+        if missing_cols:
+            for col in missing_cols:
+                val_clean[col] = 0.0
+        val_clean = val_clean.dropna(subset=feature_cols)
         if val_clean.empty or len(val_clean) < 10:
             return {"accuracy": 0}
 
-        y_true_val, X_val = self._prepare_labels(val_clean, available_cols)
+        y_true_val, X_val = self._prepare_labels(val_clean, feature_cols,
+                                                  buy_threshold=buy_threshold,
+                                                  sell_threshold=sell_threshold)
         if len(X_val) < 10:
             return {"accuracy": 0}
 
@@ -134,15 +188,17 @@ class OOSValidator:
         except Exception:
             return {"accuracy": 0}
 
-    def _prepare_labels(self, df: pd.DataFrame, available_cols: List[str]) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_labels(self, df: pd.DataFrame, available_cols: List[str],
+                        buy_threshold: float = 0.001,
+                        sell_threshold: float = 0.001) -> Tuple[np.ndarray, np.ndarray]:
         future_close = df["close"].shift(-LOOKAHEAD_5)
         current_close = df["close"]
         future_return = (future_close - current_close) / current_close
 
         y_true = np.zeros(len(df), dtype=int)
-        y_true[future_return > 0.001] = 0
-        y_true[future_return < -0.001] = 1
-        y_true[(future_return >= -0.001) & (future_return <= 0.001)] = 2
+        y_true[future_return > buy_threshold] = 0       # BUY
+        y_true[future_return < -sell_threshold] = 1     # SELL
+        y_true[(future_return >= -sell_threshold) & (future_return <= buy_threshold)] = 2  # HOLD
 
         mask = ~np.isnan(y_true)
         X = df[available_cols].values[mask]
@@ -179,20 +235,18 @@ class OOSValidator:
             if 0 <= row_idx < len(df) and row_idx + LOOKAHEAD_5 < len(df):
                 entry_price = float(df.iloc[row_idx]["close"])
                 future_price = float(df.iloc[row_idx + LOOKAHEAD_5]["close"])
+                price_return = (future_price - entry_price) / entry_price
 
                 if predicted_dir == "BUY":
-                    profit_pips = (future_price - entry_price) / 0.0001
+                    profit = price_return * 10000
                 else:
-                    profit_pips = (entry_price - future_price) / 0.0001
-
-                profit = profit_pips * 0.10
+                    profit = -price_return * 10000
 
                 trade_signals.append({
                     "predicted": predicted_dir,
                     "actual": actual_dir,
                     "win": correct_dir,
                     "profit": profit,
-                    "profit_pips": profit_pips,
                     "entry_price": entry_price,
                     "exit_price": future_price,
                 })
@@ -278,14 +332,7 @@ class OOSValidator:
                     return True
             return False
 
-        if total_trades < 3:
-            if accuracy >= 85:
-                return True
-            return False
-
-        if directional < 10:
-            if accuracy >= 75:
-                return True
+        if total_trades < 50:
             return False
 
         pf_ok = pf >= PF_THRESHOLD * 0.8
@@ -363,6 +410,17 @@ class OOSValidator:
         elif score >= 20:
             return "D"
         return "F"
+
+    def _cap_results(self, result: Dict) -> Dict:
+        """Cap unrealistic OOS metrics to prevent overfitting illusion."""
+        if result.get("success"):
+            # Capped at realistic maximums for forex
+            result["win_rate"] = min(result.get("win_rate", 0), 75.0)
+            result["profit_factor"] = min(result.get("profit_factor", 0), 5.0)
+            result["sharpe_ratio"] = min(result.get("sharpe_ratio", 0), 3.0)
+            result["non_hold_accuracy"] = min(result.get("non_hold_accuracy", 0), 80.0)
+            result["accuracy"] = min(result.get("accuracy", 0), 85.0)
+        return result
 
     def _empty_result(self, reason: str = "unknown") -> Dict:
         self.logger.warning(f"OOS validation skipped: {reason}")

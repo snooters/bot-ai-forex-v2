@@ -24,6 +24,7 @@ class NoTradeEngine:
         existing_positions: List = None,
         balance: float = 0,
         trend_result: Optional[Dict] = None,
+        signal: Optional[str] = None,
     ) -> int:
         self._reasons = []
         self._severity = 0
@@ -32,8 +33,8 @@ class NoTradeEngine:
             return 0
 
         # P3: Quality gate — unified threshold for all trends
-        QUALITY_MIN_CONF = 0.60
-        QUALITY_MIN_SCORE = 45
+        QUALITY_MIN_CONF = 0.45
+        QUALITY_MIN_SCORE = 35
         if confidence < QUALITY_MIN_CONF:
             self._severity = max(self._severity, 2)
             self._reasons.append(f"Quality gate: confidence {confidence:.0%} < {QUALITY_MIN_CONF:.0%}")
@@ -72,14 +73,35 @@ class NoTradeEngine:
 
         if regime_result:
             regime = regime_result.get("regime", "")
+            vol_score = regime_result.get("volatility_score", 0)
+            regime_conf = regime_result.get("confidence", 0.5)
+
             if regime == "NEWS_DRIVEN":
-                self._severity = max(self._severity, 1)
-                self._reasons.append("News-driven market - high uncertainty")
+                self._severity = max(self._severity, 2)
+                self._reasons.append("News-driven market - block all trades")
+
             if regime == "HIGH_VOLATILITY":
-                vol_score = regime_result.get("volatility_score", 0)
-                if vol_score > 85:
+                if vol_score > 80:
                     self._severity = max(self._severity, 2)
-                    self._reasons.append("Extreme volatility detected")
+                    self._reasons.append(f"Extreme volatility (vol_score={vol_score})")
+                elif confidence < 0.75:
+                    self._severity = max(self._severity, 2)
+                    self._reasons.append(f"High volatility + low confidence ({confidence:.0%})")
+
+            if regime in ("SIDEWAYS", "LOW_VOLATILITY"):
+                if signal in ("BUY", "SELL"):
+                    self._severity = max(self._severity, 1)
+                    self._reasons.append(f"{regime} regime - direction signal discouraged")
+
+            if regime in ("STRONG_TRENDING_BULLISH",):
+                if signal == "SELL":
+                    self._severity = max(self._severity, 2)
+                    self._reasons.append("SELL signal in STRONG_TRENDING_BULLISH regime")
+
+            if regime in ("STRONG_TRENDING_BEARISH",):
+                if signal == "BUY":
+                    self._severity = max(self._severity, 2)
+                    self._reasons.append("BUY signal in STRONG_TRENDING_BEARISH regime")
 
         if existing_positions:
             max_pos = config.get_dynamic_max_positions(balance)

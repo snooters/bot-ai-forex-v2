@@ -60,16 +60,22 @@ class MarketScorer:
         direction = trend_result.get("direction", TrendDirection.SIDEWAYS.value)
         strength = trend_result.get("strength", 0)
 
-        if direction in [TrendDirection.STRONG_BULLISH.value, TrendDirection.STRONG_BEARISH.value]:
-            base = 80
-        elif direction in [TrendDirection.BULLISH.value, TrendDirection.BEARISH.value]:
-            base = 78
-        elif direction in [TrendDirection.WEAK_BULLISH.value, TrendDirection.WEAK_BEARISH.value]:
-            base = 75
-        elif direction == TrendDirection.CONSOLIDATION.value:
+        if direction == TrendDirection.STRONG_BULLISH.value:
+            base = 85
+        elif direction == TrendDirection.BULLISH.value:
+            base = 70
+        elif direction == TrendDirection.WEAK_BULLISH.value:
+            base = 60
+        elif direction == TrendDirection.STRONG_BEARISH.value:
+            base = 15
+        elif direction == TrendDirection.BEARISH.value:
             base = 30
+        elif direction == TrendDirection.WEAK_BEARISH.value:
+            base = 40
+        elif direction == TrendDirection.CONSOLIDATION.value:
+            base = 50
         else:
-            base = 20
+            base = 50
 
         return base * (0.5 + 0.5 * strength)
 
@@ -104,9 +110,9 @@ class MarketScorer:
 
         regime_scores = {
             MarketRegime.STRONG_TRENDING_BULLISH.value: 85,
-            MarketRegime.STRONG_TRENDING_BEARISH.value: 85,
+            MarketRegime.STRONG_TRENDING_BEARISH.value: 15,
             MarketRegime.WEAK_TRENDING_BULLISH.value: 65,
-            MarketRegime.WEAK_TRENDING_BEARISH.value: 65,
+            MarketRegime.WEAK_TRENDING_BEARISH.value: 35,
             MarketRegime.LOW_VOLATILITY.value: 50,
             MarketRegime.SIDEWAYS.value: 30,
             MarketRegime.CONSOLIDATION.value: 20,

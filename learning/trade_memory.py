@@ -26,7 +26,7 @@ INDICATOR_FIELDS = [
 
 
 class TradeMemory:
-    def __init__(self):
+    def __init__(self, account_id: str = ""):
         self.logger = get_logger("trade_memory")
         self._memory_dir = Path(TRADE_HISTORY_DIR)
         self._memory_dir.mkdir(parents=True, exist_ok=True)
@@ -34,8 +34,27 @@ class TradeMemory:
         self._json_path = self._memory_dir / "trade_memory.json"
         self._lock = threading.Lock()
         self._trades: List[Dict] = []
+        self.account_id = account_id
         self._init_db()
         self._load()
+
+    def set_account_id(self, account_id: str):
+        if account_id and account_id != self.account_id:
+            self.account_id = account_id
+            try:
+                conn = sqlite3.connect(str(self._db_path))
+                cursor = conn.execute(
+                    "UPDATE trades SET account_id=? WHERE account_id='' OR account_id IS NULL",
+                    (account_id,)
+                )
+                updated = cursor.rowcount
+                conn.commit()
+                conn.close()
+                if updated > 0:
+                    self.logger.info(f"Assigned {updated} legacy trades to account {account_id}")
+            except Exception:
+                pass
+            self._load()
 
     def _init_db(self):
         with self._lock:
@@ -43,6 +62,7 @@ class TradeMemory:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS trades (
                     trade_id TEXT PRIMARY KEY,
+                    account_id TEXT DEFAULT '',
                     pair TEXT,
                     timeframe TEXT,
                     direction TEXT,
@@ -68,9 +88,14 @@ class TradeMemory:
                     created_at TEXT
                 )
             """)
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN account_id TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_pair ON trades(pair)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_result ON trades(result)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_entry_time ON trades(entry_time)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_account_id ON trades(account_id)")
             conn.commit()
             conn.close()
 
@@ -109,6 +134,7 @@ class TradeMemory:
 
         record = {
             "trade_id": trade_id,
+            "account_id": self.account_id,
             "pair": pair,
             "timeframe": timeframe,
             "direction": direction,
@@ -179,15 +205,16 @@ class TradeMemory:
                 conn = sqlite3.connect(str(self._db_path))
                 conn.execute("""
                     INSERT OR REPLACE INTO trades
-                    (trade_id, pair, timeframe, direction, entry_price, exit_price,
+                    (trade_id, account_id, pair, timeframe, direction, entry_price, exit_price,
                      volume, profit, profit_pips, result, exit_reason,
                      entry_time, exit_time, model_version, confidence,
                      trade_duration_minutes, max_dd_during_trade,
                      spread, commission, swap, session,
                      indicators, market_conditions, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
-                    record["trade_id"], record["pair"], record["timeframe"],
+                    record["trade_id"], record.get("account_id", self.account_id),
+                    record["pair"], record["timeframe"],
                     record["direction"], record["entry_price"], record["exit_price"],
                     record["volume"], record["profit"], record["profit_pips"],
                     record["result"], record["exit_reason"],
@@ -341,7 +368,13 @@ class TradeMemory:
         try:
             with self._lock:
                 conn = sqlite3.connect(str(self._db_path))
-                rows = conn.execute("SELECT * FROM trades ORDER BY created_at").fetchall()
+                if self.account_id:
+                    rows = conn.execute(
+                        "SELECT * FROM trades WHERE account_id=? ORDER BY created_at",
+                        (self.account_id,)
+                    ).fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM trades ORDER BY created_at").fetchall()
                 col_names = [d[1] for d in conn.execute("PRAGMA table_info(trades)").fetchall()]
                 conn.close()
             self._trades = []
@@ -351,10 +384,26 @@ class TradeMemory:
                 rec["market_conditions"] = json.loads(rec.get("market_conditions") or "{}")
                 self._trades.append(rec)
             if not self._trades and self._json_path.exists():
-                self.logger.info("SQLite empty but JSON exists — migrating")
-                self._load_json_fallback()
+                if self.account_id:
+                    db_count = 0
+                    try:
+                        conn2 = sqlite3.connect(str(self._db_path))
+                        db_count = conn2.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+                        conn2.close()
+                    except Exception:
+                        pass
+                    if db_count > 0:
+                        self.logger.info(f"Loaded 0 trades from SQLite for account={self.account_id} "
+                                       f"(total in DB: {db_count})")
+                    else:
+                        self.logger.info("SQLite empty but JSON exists — migrating")
+                        self._load_json_fallback()
+                else:
+                    self.logger.info("SQLite empty but JSON exists — migrating")
+                    self._load_json_fallback()
             else:
-                self.logger.info(f"Loaded {len(self._trades)} trades from SQLite")
+                total_info = f" (account={self.account_id})" if self.account_id else " (account=all)"
+                self.logger.info(f"Loaded {len(self._trades)} trades from SQLite{total_info}")
         except Exception as e:
             self.logger.warning(f"SQLite load failed ({e}), trying JSON fallback")
             self._load_json_fallback()

@@ -45,6 +45,10 @@ class Config:
                 "timeframes": self._get_list("TRADING_TIMEFRAMES", ["M5", "M15", "M30", "H1", "H4"]),
                 "adaptive_timeframe": self._get_bool("ADAPTIVE_TIMEFRAME", True),
                 "use_multi_timeframe": self._get_bool("USE_MULTI_TIMEFRAME", True),
+                "min_rr": self._get_float("MIN_RR", 1.33),
+                "min_profit_pips_exit": self._get_float("MIN_PROFIT_PIPS_EXIT", 5.0),
+                "min_profit_atr_exit": self._get_float("MIN_PROFIT_ATR_EXIT", 0.5),
+                "secure_close_threshold": self._get_int("SECURE_CLOSE_THRESHOLD", 55),
             },
             "risk": {
                 "max_risk_pct": self._get_float("MAX_RISK_PCT", 0.005),
@@ -59,13 +63,15 @@ class Config:
                 "trailing_distance": self._get_float("TRAILING_DISTANCE", 10.0),
                 "trailing_atr_multiplier": self._get_float("TRAILING_ATR_MULTIPLIER", 1.5),
                 "max_hold_hours": self._get_int("MAX_HOLD_HOURS", 12),
+                "max_atr_pct": self._get_float("MAX_ATR_PCT", 0.02),
                 "use_dynamic_risk": self._get_bool("USE_DYNAMIC_RISK", True),
             },
             "ai_filter": {
-                "min_confidence": self._get_float("MIN_CONFIDENCE", 0.55),
-                "min_market_score": self._get_int("MIN_MARKET_SCORE", 50),
+                "min_confidence": self._get_float("MIN_CONFIDENCE", 0.40),
+                "min_market_score": self._get_int("MIN_MARKET_SCORE", 30),
                 "allow_no_trade": self._get_bool("ALLOW_NO_TRADE", True),
                 "max_spread_pips": self._get_float("MAX_SPREAD_PIPS", 2.0),
+                "counter_trade_min_confidence": self._get_float("COUNTER_TRADE_MIN_CONFIDENCE", 0.60),
             },
             "learning": {
                 "enabled": self._get_bool("ENABLE_SELF_LEARNING", True),
@@ -88,6 +94,8 @@ class Config:
                 "confirm_training": self._get_str("CONFIRM_TRAINING", "yes"),
                 "historical_years": self._get_int("HISTORICAL_YEARS", 2),
                 "rolling_window_days": self._get_int("ROLLING_TRAINING_WINDOW_DAYS", 180),
+                "buy_threshold": self._get_float("BUY_THRESHOLD", 0.0004),
+                "sell_threshold": self._get_float("SELL_THRESHOLD", 0.0004),
             },
             "analysis": {
                 "market_structure": self._get_bool("ENABLE_MARKET_STRUCTURE", True),
@@ -131,11 +139,14 @@ class Config:
                 "notify_heartbeat": self._get_bool("TELEGRAM_NOTIFY_HEARTBEAT", True),
             },
             "emergency": {
-                "caution_dd": self._get_float("EMERGENCY_CAUTION_DD", 0.03),
-                "danger_dd": self._get_float("EMERGENCY_DANGER_DD", 0.04),
-                "critical_dd": self._get_float("EMERGENCY_CRITICAL_DD", 0.05),
+                "caution_dd": self._get_float("EMERGENCY_CAUTION_DD", 0.10),
+                "danger_dd": self._get_float("EMERGENCY_DANGER_DD", 0.15),
+                "critical_dd": self._get_float("EMERGENCY_CRITICAL_DD", 0.25),
                 "auto_close_positions": self._get_bool("EMERGENCY_AUTO_CLOSE_POSITIONS", True),
                 "notify_telegram": self._get_bool("EMERGENCY_NOTIFY_TELEGRAM", True),
+            },
+            "dashboard": {
+                "hidden": self._get_bool("DASHBOARD_HIDDEN", False),
             },
             "backtest": {
                 "walk_forward": self._get_bool("ENABLE_WALK_FORWARD_TEST", True),
@@ -187,16 +198,54 @@ class Config:
 
     def _validate(self):
         acct = self._config["account"]
+
+        valid_modes = ("live", "demo", "simulation")
+        if acct["trading_mode"] not in valid_modes:
+            raise ConfigError(f"TRADING_MODE must be one of {valid_modes}, got '{acct['trading_mode']}'")
+
         if acct["trading_mode"] == "live" and not acct["allow_real"]:
             if not acct.get("learn_only"):
                 raise ConfigError("Real trading not allowed. Set ALLOW_REAL_TRADING=true in .env or LEARN_ONLY=true")
         if not acct["is_demo"] and acct["trading_mode"] == "live":
             if not acct["server"] or not acct["user_id"]:
                 raise ConfigError("Live mode requires SERVER and USER_ID")
-        if self._config["risk"]["max_risk_pct"] > 0.02:
-            raise ConfigError("MAX_RISK_PCT cannot exceed 2%")
-        if self._config["risk"]["max_daily_loss_pct"] > 0.10:
-            raise ConfigError("MAX_DAILY_LOSS_PCT cannot exceed 10%")
+
+        valid_tfs = {"M1", "M5", "M15", "M30", "H1", "H2", "H4", "H6", "H8", "D1", "W1", "MN1"}
+        tfs = set(self._config["trading"]["timeframes"])
+        invalid_tfs = tfs - valid_tfs
+        if invalid_tfs:
+            raise ConfigError(f"Invalid TRADING_TIMEFRAMES: {invalid_tfs}")
+
+        risk = self._config["risk"]
+        if risk["max_risk_pct"] <= 0 or risk["max_risk_pct"] > 0.05:
+            raise ConfigError(f"MAX_RISK_PCT must be in (0, 0.05], got {risk['max_risk_pct']}")
+        if risk["max_daily_loss_pct"] <= 0 or risk["max_daily_loss_pct"] > 0.20:
+            raise ConfigError(f"MAX_DAILY_LOSS_PCT must be in (0, 0.20], got {risk['max_daily_loss_pct']}")
+        if risk["max_hold_hours"] < 1:
+            raise ConfigError(f"MAX_HOLD_HOURS must be >= 1, got {risk['max_hold_hours']}")
+
+        conf = self._config["ai_filter"]["min_confidence"]
+        if not 0 <= conf <= 1:
+            raise ConfigError(f"MIN_CONFIDENCE must be in [0, 1], got {conf}")
+
+        valid_log_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+        if self._config["logging"]["level"].upper() not in valid_log_levels:
+            raise ConfigError(f"LOG_LEVEL must be one of {valid_log_levels}")
+
+        if self._config["training"]["historical_years"] < 1:
+            raise ConfigError(f"HISTORICAL_YEARS must be >= 1, got {self._config['training']['historical_years']}")
+
+        pt = self._config["profit_target"]["percent"]
+        if not 0 < pt <= 1:
+            raise ConfigError(f"PROFIT_TARGET_PERCENT must be in (0, 1], got {pt}")
+
+        emerg = self._config["emergency"]
+        if not (emerg["caution_dd"] < emerg["danger_dd"] < emerg["critical_dd"]):
+            raise ConfigError(
+                f"Emergency DD thresholds must be ascending: "
+                f"caution={emerg['caution_dd']} danger={emerg['danger_dd']} critical={emerg['critical_dd']}"
+            )
+
         pairs = self._config["trading"]["pairs"]
         for p in pairs:
             base = p.split(".")[0]
@@ -267,16 +316,20 @@ class Config:
     def diagnostic(self) -> dict:
         return self._config["diagnostic"]
 
+    @property
+    def dashboard(self) -> dict:
+        return self._config["dashboard"]
+
     def get_dynamic_min_confidence(self, balance: float) -> float:
         if balance < 200:
-            return 0.65
+            return 0.40
         elif balance < 500:
-            return 0.55
+            return 0.38
         elif balance < 2000:
-            return 0.50
+            return 0.35
         elif balance < 5000:
-            return 0.45
-        return 0.40
+            return 0.32
+        return 0.30
 
     def get_dynamic_max_positions(self, balance: float) -> int:
         if balance < 500:

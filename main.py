@@ -5,12 +5,20 @@ AI Forex Trading Bot v2 - Production-Ready System
 SURVIVAL > CONSISTENCY > PROFIT
 """
 
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
 import asyncio
 import argparse
+import json
 import sys
 import time
 from datetime import datetime, date, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional
+
+import numpy as np
+np.seterr(divide="ignore", invalid="ignore")
 
 import pandas as pd
 import numpy as np
@@ -56,8 +64,12 @@ from learning.weekend_trainer import WeekendTrainer
 from telegram.telegram_engine import TelegramEngine
 from reports.report_engine import ReportEngine
 from dashboard.dashboard import Dashboard
+from dashboard.tiktok_dashboard import TikTokDashboard
+from monitor.health_server import update_state as health_update
 from utils.logger import get_logger
 from utils.training_progress import TrainingProgress
+from utils import sounds as sound_utils
+from utils.readiness_estimator import estimate_real_readiness
 
 
 class ForexBot:
@@ -109,8 +121,13 @@ class ForexBot:
         self.report_engine = None
 
         self.dashboard = Dashboard()
+        if config.dashboard.get("hidden"):
+            self.dashboard.hide()
         self._dashboard_refreshed = False
         self._last_dashboard_display = datetime.now()
+        self._tiktok_mode = False
+        self.tiktok_dashboard = TikTokDashboard()
+        self._last_tiktok_display = datetime.now()
         self._symbols = config.trading["pairs"]
         self._timeframes = [self._tf_to_minutes(tf) for tf in config.trading["timeframes"]]
 
@@ -118,6 +135,7 @@ class ForexBot:
         self._account_info: Dict = {}
         self._last_heartbeat_time = 0.0
         self._last_emergency_check: Dict = {}
+
 
     def _tf_to_minutes(self, tf: str) -> int:
         mapping = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240}
@@ -135,11 +153,23 @@ class ForexBot:
                          f"critical={config.emergency['critical_dd']*100:.0f}%")
         self.logger.info("=" * 60)
 
+        try:
+            from monitor.health_server import start_server
+            import threading
+            t = threading.Thread(target=start_server, daemon=True)
+            t.start()
+            self.logger.info("Health check server started on 127.0.0.1:9090")
+        except Exception as e:
+            self.logger.debug(f"Health check server not started: {e}")
+
         self.logger.info("Initializing Market Data Engine...")
         self.data_engine.initialize()
 
-        self.logger.info("Initializing Account & Risk Manager...")
         account_info = self.data_engine.get_account_info()
+        if account_info and account_info.get("login"):
+            self.trade_memory.set_account_id(str(account_info["login"]))
+
+        self.logger.info("Initializing Account & Risk Manager...")
         if account_info:
             self.risk_manager.initialize(account_info.get("balance", config.account["balance"]))
             self._account_info = account_info
@@ -156,6 +186,8 @@ class ForexBot:
             }
 
         try:
+            if self.data_engine.connector._mt5_available:
+                self.data_engine.connector.ensure_connected()
             synced = self.trade_logger.sync_from_mt5(self.data_engine.connector)
             if synced > 0:
                 self.logger.info(f"Trade history synced: +{synced} trades from MT5")
@@ -210,13 +242,21 @@ class ForexBot:
                         continue
                     self.logger.info(f"  {tf_label}: {len(df)} rows — preparing features...")
                     try:
-                        X, y, features, df_clean = self.model_trainer.prepare_training_data(df)
+                        X, y, features, df_clean = self.model_trainer.prepare_training_data(
+                            df, pair=symbol, timeframe=tf,
+                        )
                     except Exception as e:
                         self.logger.warning(f"  {tf_label}: feature prep failed — {e}")
                         continue
                     recency = ModelTrainer.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
+                    X, y, trade_weights = self.model_trainer.incorporate_trade_outcomes(
+                        X, y, features, pair=symbol, timeframe=tf, min_trades=5,
+                    )
                     self.logger.info(f"  {tf_label}: {len(X)} samples — training models...")
-                    results = self.model_trainer.train_all_models(X, y, feature_cols=features, recency_weights=recency)
+                    results = self.model_trainer.train_all_models(
+                        X, y, feature_cols=features, recency_weights=recency,
+                        trade_outcome_weights=trade_weights, tf_label=tf_label,
+                    )
                     if self.model_trainer.get_ensemble().get_num_models() > 0:
                         version = self.model_manager.save_ensemble(
                             self.model_trainer.get_ensemble(), timeframe=tf
@@ -323,6 +363,7 @@ class ForexBot:
         last_heartbeat = 0.0
         last_report_check = datetime.now()
         last_data_refresh = datetime.now()
+        last_mt5_sync = datetime.now()
 
         while self.running:
             try:
@@ -355,6 +396,14 @@ class ForexBot:
                     self._last_dashboard_display = now
                     self.dashboard.display()
 
+                if self._tiktok_mode:
+                    if not self._dashboard_refreshed and self._last_analysis:
+                        self._last_tiktok_display = now
+                        self.tiktok_dashboard.display()
+                    elif (now - self._last_tiktok_display).total_seconds() >= 3:
+                        self._last_tiktok_display = now
+                        self.tiktok_dashboard.display()
+
                 if (now - last_data_refresh).total_seconds() >= 1800:
                     self.logger.info("Periodic data refresh: downloading latest candles...")
                     for symbol in self._symbols:
@@ -362,6 +411,17 @@ class ForexBot:
                             self.data_engine.refresh_stored_data(symbol, tf, count=2000)
                     last_data_refresh = now
                     self.logger.info("Periodic data refresh complete")
+
+                if (now - last_mt5_sync).total_seconds() >= 3600:
+                    try:
+                        if self.data_engine.connector._mt5_available:
+                            self.data_engine.connector.ensure_connected()
+                        synced = self.trade_logger.sync_from_mt5(self.data_engine.connector)
+                        if synced > 0:
+                            self.logger.info(f"MT5 trade sync: +{synced} new trades")
+                    except Exception as e:
+                        self.logger.debug(f"MT5 periodic sync skipped: {e}")
+                    last_mt5_sync = now
 
                 retrain_needed, reason = self.auto_retrain.check_retrain_needed()
                 if retrain_needed:
@@ -381,7 +441,7 @@ class ForexBot:
                 })
                 await asyncio.sleep(30)
 
-    def _align_multi_tf(self, symbol: str, count_m5: int = 500, count_context: int = 200):
+    async def _align_multi_tf(self, symbol: str, count_m5: int = 500, count_context: int = 200):
         """Fetch M5 + context TFs and align to M5 timestamps."""
         import pandas as pd
         import numpy as np
@@ -390,7 +450,7 @@ class ForexBot:
         data = {}
         for label, tf in tfs.items():
             cnt = count_m5 if tf == 5 else count_context
-            df = self.data_engine.get_rates(symbol, tf, count=cnt)
+            df = await self.data_engine.get_rates_async(symbol, tf, count=cnt, force_refresh=True)
             if df.empty:
                 self.logger.warning(f"  MTF align: no data for {symbol} {label}")
                 return None
@@ -426,17 +486,17 @@ class ForexBot:
                 perf = self.performance_analyzer.analyze_trades(trades)
                 if perf.get("by_timeframe"):
                     perf_data = perf["by_timeframe"]
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.debug(f"Performance analysis failed for {symbol}: {e}")
 
             selected_tfs = self.timeframe_selector.select_timeframes(
-                {tf: self.data_engine.get_rates(symbol, tf, count=50) for tf in self._timeframes},
+                {tf: self.data_engine.get_rates(symbol, tf, count=50, force_refresh=True) for tf in self._timeframes},
                 performance_data=perf_data,
             )
 
             # ── Multi-TF: M5 entry + context from M15/M30/H1/H4 ──
             entry_tf = Timeframe.M5
-            aligned = self._align_multi_tf(symbol, count_m5=500, count_context=200)
+            aligned = await self._align_multi_tf(symbol, count_m5=500, count_context=200)
             if aligned is None or aligned.empty:
                 return
 
@@ -494,6 +554,8 @@ class ForexBot:
             multi_tf_trends_log = {k: multi_tf_trends.get(k, 0) for k in ["trend240", "trend60", "trend30", "trend15"]}
             self.logger.debug(f"MTF [{symbol}] trends={multi_tf_trends_log}")
 
+            pair_skill_score = self.skill_scorer.get_pair_skills().get(symbol, 50)
+
             decision = self.decision_engine.make_decision(
                 symbol=symbol,
                 df_entry={entry_tf: df_aligned_feat},
@@ -510,6 +572,7 @@ class ForexBot:
                 spread=spread,
                 timeframe=entry_tf,
                 multi_tf_trends=multi_tf_trends,
+                pair_skill_score=pair_skill_score,
             )
 
             self.decision_logger.log_decision(symbol, decision)
@@ -549,14 +612,14 @@ class ForexBot:
             else:
                 if not decision["no_trade"] and is_trade_action:
                     if not positions:
-                        atr = (df_entry_feat["atr"].iloc[-1] if "atr" in df_entry_feat.columns
-                               and not df_entry_feat["atr"].empty else 0.001)
+                        atr = (df_aligned_feat["atr"].iloc[-1] if "atr" in df_aligned_feat.columns
+                               and not df_aligned_feat["atr"].empty else 0.001)
 
                         trade_result = self.entry_engine.open_trade(
                             symbol=symbol,
                             decision=decision,
                             account_info=self._account_info,
-                            df_entry=df_entry_feat,
+                            df_entry=df_aligned_feat,
                             atr=atr,
                             current_price=price,
                             existing_positions=positions,
@@ -564,6 +627,7 @@ class ForexBot:
 
                         if trade_result:
                             self.trade_logger.log_trade_open(trade_result)
+                            sound_utils.entry()
                             await self.telegram.send_event(TelegramEvent.OPEN_POSITION, {
                                 **trade_result,
                                 "confidence": decision.get("confidence", 0),
@@ -571,12 +635,20 @@ class ForexBot:
                             })
 
             if not config.account.get("learn_only") and positions:
+                atr_val = float(df_aligned_feat["atr"].iloc[-1]) if "atr" in df_aligned_feat.columns and not df_aligned_feat["atr"].empty else 0.001
+                rsi_val = float(df_aligned_feat["rsi"].iloc[-1]) if "rsi" in df_aligned_feat.columns and not df_aligned_feat["rsi"].empty else 50.0
                 actions = self.position_manager.manage_positions(
                     symbol=symbol,
                     trend_result=trend_result,
                     regime_result=regime_result,
                     confidence=decision.get("confidence", 0),
-                    market_structure=self.feature_pipeline.market_structure.get_last_hh_ll(df_trend_feat),
+                    market_structure=self.feature_pipeline.market_structure.get_last_hh_ll(df_aligned_feat),
+                    multi_tf_trends=multi_tf_trends,
+                    momentum_result=momentum_result,
+                    vol_result=vol_result,
+                    rsi=rsi_val,
+                    atr=atr_val,
+                    balance=self._account_info.get("balance", 0),
                 )
 
                 for action in actions:
@@ -597,6 +669,10 @@ class ForexBot:
                                 "pips": closed_trade.get("profit_pips", 0),
                                 "reason": action["action"],
                             })
+                            if closed_trade.get("profit", 0) > 0:
+                                sound_utils.win()
+                            elif closed_trade.get("profit", 0) < 0:
+                                sound_utils.loss()
                             if closed_trade.get("profit", 0) < 0:
                                 await self.telegram.send_event(TelegramEvent.LOSS_ALERT, {
                                     "symbol": symbol,
@@ -689,6 +765,20 @@ class ForexBot:
 
         retrain_needed, retrain_reason = self.auto_retrain.check_retrain_needed() if self.auto_retrain else (False, "")
 
+        health_update(
+            is_running=not self.paused,
+            is_connected=self.data_engine.connector.is_connected if hasattr(self.data_engine, 'connector') else False,
+            account_balance=self._account_info.get("balance", 0),
+            account_equity=self._account_info.get("equity", 0),
+            open_positions=len(positions),
+            emergency_level=acct_status.get("emergency_level", "NORMAL"),
+            trading_paused=acct_status.get("trading_paused", False),
+            total_retrains=retrain_count,
+            skill_level=skill,
+            uptime_seconds=uptime.total_seconds(),
+            mode=config.account["trading_mode"],
+        )
+
         regime = "N/A"
         for sym, analysis in self._last_analysis.items():
             regime = analysis.get("regime", {}).get("regime", "N/A")
@@ -744,10 +834,18 @@ class ForexBot:
                     continue
 
                 self.logger.info(f"TRAINING [{idx+1}/{len(tf_list)}] {tf_label} — preparing features ({len(df)} rows)...")
-                X, y, features, df_clean = self.model_trainer.prepare_training_data(df)
+                X, y, features, df_clean = self.model_trainer.prepare_training_data(
+                    df, pair=symbol, timeframe=tf,
+                )
                 recency = ModelTrainer.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
+                X, y, trade_weights = self.model_trainer.incorporate_trade_outcomes(
+                    X, y, features, pair=symbol, timeframe=tf, min_trades=5,
+                )
                 self.logger.info(f"TRAINING [{idx+1}/{len(tf_list)}] {tf_label} — training models ({len(X)} samples)...")
-                results = self.model_trainer.train_all_models(X, y, feature_cols=features, recency_weights=recency)
+                results = self.model_trainer.train_all_models(
+                    X, y, feature_cols=features, recency_weights=recency,
+                    trade_outcome_weights=trade_weights, tf_label=tf_label,
+                )
                 if self.model_trainer.get_ensemble().get_num_models() > 0:
                     version = self.model_manager.save_ensemble(
                         self.model_trainer.get_ensemble(), timeframe=tf
@@ -783,12 +881,16 @@ class ForexBot:
                         }
                         self.model_manager.save_performance(version, perf_data)
 
+                        _bt = config.training["buy_threshold"]
+                        _st = config.training["sell_threshold"]
                         oos_result = self.oos_validator.validate(
                             df=df,
                             ensemble=self.model_trainer.get_ensemble(),
                             trainer=self.model_trainer,
                             timeframe_label=tf_label,
                             oos_split=0.2,
+                            buy_threshold=_bt,
+                            sell_threshold=_st,
                         )
                         self.model_manager.save_oos_result(version, oos_result)
                         if oos_result.get("success"):
@@ -857,25 +959,54 @@ class ForexBot:
         else:
             self.logger.warning("All training attempts failed. Running with untrained model.")
 
-    def _retry_model_params(self, attempt: int) -> tuple:
-        if attempt == 1:
-            return 2.0, {
-                "xgboost": {"n_estimators": 300, "max_depth": 8, "learning_rate": 0.03},
-                "random_forest": {"n_estimators": 300, "max_depth": 10},
-                "lightgbm": {"n_estimators": 300, "max_depth": 8, "learning_rate": 0.03},
-            }
-        elif attempt == 2:
-            return 4.0, {
-                "xgboost": {"n_estimators": 400, "max_depth": 10, "learning_rate": 0.02, "subsample": 0.7, "colsample_bytree": 0.7},
-                "random_forest": {"n_estimators": 400, "max_depth": 12, "min_samples_split": 5},
-                "lightgbm": {"n_estimators": 400, "max_depth": 10, "learning_rate": 0.02, "subsample": 0.7, "colsample_bytree": 0.7},
-            }
+    def _retry_model_params(self, attempt: int, warm_start: bool = False) -> tuple:
+        """Get model params for retry attempts.
+        
+        Args:
+            attempt: 1, 2, or 3
+            warm_start: If True, use fine-tuning params (smaller LR, fewer estimators)
+                        karena model sudah punya dasar dari versi sebelumnya.
+        """
+        if warm_start:
+            # Fine-tuning mode: model sudah punya dasar, tinggal adaptasi ke data baru
+            if attempt == 1:
+                return 1.5, {
+                    "xgboost": {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.01, "subsample": 0.8},
+                    "random_forest": {"n_estimators": 100, "max_depth": 8, "min_samples_split": 10},
+                    "lightgbm": {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.01, "subsample": 0.8},
+                }
+            elif attempt == 2:
+                return 2.0, {
+                    "xgboost": {"n_estimators": 150, "max_depth": 8, "learning_rate": 0.015, "subsample": 0.7},
+                    "random_forest": {"n_estimators": 150, "max_depth": 10, "min_samples_split": 5},
+                    "lightgbm": {"n_estimators": 150, "max_depth": 8, "learning_rate": 0.015, "subsample": 0.7},
+                }
+            else:
+                return 3.0, {
+                    "xgboost": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.02, "gamma": 0.3, "reg_alpha": 0.3},
+                    "random_forest": {"n_estimators": 200, "max_depth": 6, "min_samples_split": 20},
+                    "lightgbm": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.02, "reg_alpha": 0.3},
+                }
         else:
-            return 6.0, {
-                "xgboost": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "gamma": 0.5, "reg_alpha": 0.5, "reg_lambda": 2.0},
-                "random_forest": {"n_estimators": 200, "max_depth": 6, "min_samples_split": 20},
-                "lightgbm": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "reg_alpha": 0.5, "reg_lambda": 2.0},
-            }
+            # From-scratch mode: model belum punya dasar, perlu training penuh
+            if attempt == 1:
+                return 2.0, {
+                    "xgboost": {"n_estimators": 300, "max_depth": 8, "learning_rate": 0.03},
+                    "random_forest": {"n_estimators": 300, "max_depth": 10},
+                    "lightgbm": {"n_estimators": 300, "max_depth": 8, "learning_rate": 0.03},
+                }
+            elif attempt == 2:
+                return 4.0, {
+                    "xgboost": {"n_estimators": 400, "max_depth": 10, "learning_rate": 0.02, "subsample": 0.7, "colsample_bytree": 0.7},
+                    "random_forest": {"n_estimators": 400, "max_depth": 12, "min_samples_split": 5},
+                    "lightgbm": {"n_estimators": 400, "max_depth": 10, "learning_rate": 0.02, "subsample": 0.7, "colsample_bytree": 0.7},
+                }
+            else:
+                return 6.0, {
+                    "xgboost": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "gamma": 0.5, "reg_alpha": 0.5, "reg_lambda": 2.0},
+                    "random_forest": {"n_estimators": 200, "max_depth": 6, "min_samples_split": 20},
+                    "lightgbm": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.1, "reg_alpha": 0.5, "reg_lambda": 2.0},
+                }
 
     async def _perform_retrain(self, data_override: Optional[Dict] = None):
         self.logger.info("Starting auto retrain...")
@@ -918,8 +1049,9 @@ class ForexBot:
                     attempt_versions = []
 
                     for attempt in range(1, max_retries + 1):
-                        weight_mult, model_params = self._retry_model_params(attempt)
-                        self.logger.info(f"RETRAIN [{idx+1}/{len(trained_timeframes)}] {tf_label} — attempt {attempt}/{max_retries} (w={weight_mult})...")
+                        is_warm_start = old_version is not None
+                        weight_mult, model_params = self._retry_model_params(attempt, warm_start=is_warm_start)
+                        self.logger.info(f"RETRAIN [{idx+1}/{len(trained_timeframes)}] {tf_label} — attempt {attempt}/{max_retries} (w={weight_mult}, warm_start={is_warm_start})...")
 
                         self.auto_retrain.model_trainer.ensemble = VotingEnsemble()
                         result = self.auto_retrain.retrain(
@@ -928,6 +1060,7 @@ class ForexBot:
                             model_params=model_params,
                             progress=progress,
                             tf_label=tf_label,
+                            pair=symbol,
                         )
                         if not result.get("success"):
                             self.logger.warning(f"  {tf_label} attempt {attempt}: training failed — {result.get('error', 'unknown')}")
@@ -944,15 +1077,26 @@ class ForexBot:
                             perf_data["accuracy"][f"{m_name}_val"] = m_data.get("val_accuracy", 0) or 0
                         self.model_manager.save_performance(attempt_version, perf_data)
 
-                        ensemble = self.model_manager.load_ensemble(attempt_version)
+                        try:
+                            ensemble = self.model_manager.load_ensemble(attempt_version)
+                        except Exception as e:
+                            self.logger.warning(f"  {tf_label} attempt {attempt}: failed to load ensemble: {e}")
+                            continue
 
                         progress.begin_oos()
-                        oos_result = self.oos_validator.validate(
-                            df=df, ensemble=ensemble, trainer=self.model_trainer,
-                            timeframe_label=tf_label, oos_split=0.2,
-                        )
+                        try:
+                            _bt = config.training["buy_threshold"]
+                            _st = config.training["sell_threshold"]
+                            oos_result = self.oos_validator.validate(
+                                df=df, ensemble=ensemble, trainer=self.model_trainer,
+                                timeframe_label=tf_label, oos_split=0.2,
+                                buy_threshold=_bt, sell_threshold=_st,
+                            )
+                        except Exception as e:
+                            oos_result = self.oos_validator._empty_result(f"OOS validation crashed: {e}")
                         progress.end_oos()
                         self.model_manager.save_oos_result(attempt_version, oos_result)
+                        self.logger.info(f"  {tf_label} attempt {attempt}: OOS saved for {attempt_version}")
 
                         if oos_result.get("success"):
                             self.logger.info(
@@ -981,27 +1125,57 @@ class ForexBot:
                         fallback_eligible = not oos_success and oos_acc >= 50
                         self.logger.info(
                             f"  {tf_label} attempt {attempt}: oos_success={oos_success} "
-                            f"acc={oos_acc:.1f}% → "
+                            f"acc={oos_acc:.1f}% -> "
                             f"{'PASS' if oos_success else 'FALLBACK_ELIGIBLE' if fallback_eligible else 'REJECT'}"
                         )
 
                         if oos_success or fallback_eligible:
                             effective_pass = oos_result.get("passed", False) if oos_result.get("success") else True
                             if effective_pass:
+                                new_score = self.model_manager._compute_oos_numeric_score(oos_result)
                                 if old_version:
-                                    old_oos = self.model_manager.get_oos_result(old_version)
-                                    if old_oos.get("success"):
-                                        new_score = oos_result.get("win_rate", 0) * oos_result.get("profit_factor", 0)
-                                        old_score = old_oos.get("win_rate", 0) * old_oos.get("profit_factor", 0)
-                                        if new_score >= old_score * 0.5:
+                                    # Re-evaluasi old model pada data yang SAMA untuk fair comparison
+                                    try:
+                                        old_ensemble = self.model_manager.load_ensemble(old_version)
+                                        if old_ensemble.get_num_models() > 0:
+                                            _bt = config.training["buy_threshold"]
+                                            _st = config.training["sell_threshold"]
+                                            old_oos_result = self.oos_validator.validate(
+                                                df=df, ensemble=old_ensemble,
+                                                trainer=self.model_trainer,
+                                                timeframe_label=tf_label, oos_split=0.2,
+                                                buy_threshold=_bt, sell_threshold=_st,
+                                            )
+                                            old_oos = old_oos_result
+                                            old_score = self.model_manager._compute_oos_numeric_score(old_oos_result)
+                                            self.logger.info(
+                                                f"  {tf_label}: re-evaluated {old_version} on same data: "
+                                                f"WR={old_oos.get('win_rate',0):.1f}% "
+                                                f"PF={old_oos.get('profit_factor',0):.2f} "
+                                                f"Score={old_score:.1f}"
+                                            )
+                                    except Exception as e:
+                                        self.logger.warning(f"  {tf_label}: could not re-evaluate {old_version}: {e}")
+                                        old_oos = self.model_manager.get_oos_result(old_version)
+                                        old_score = self.model_manager._compute_oos_numeric_score(old_oos)
+
+                                    if old_score > 0:
+                                        better, reason = ModelManager.is_model_better(oos_result, old_oos)
+                                        if not better:
+                                            self.logger.info(
+                                                f"  {tf_label} attempt {attempt}: REJECTED ({reason})"
+                                            )
+                                        else:
                                             accepted = True
-                                            self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (score={new_score:.2f} >= old*0.5={old_score*0.5:.2f})")
+                                            self.logger.info(
+                                                f"  {tf_label} attempt {attempt}: ACCEPTED ({reason})"
+                                            )
                                     else:
                                         accepted = True
-                                        self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (no old OOS)")
+                                        self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (first ever, score={new_score:.1f})")
                                 else:
                                     accepted = True
-                                    self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (first ever)")
+                                    self.logger.info(f"  {tf_label} attempt {attempt}: ACCEPTED (first ever, score={new_score:.1f})")
                             else:
                                 self.logger.info(f"  {tf_label} attempt {attempt}: not passed (PF={oos_result.get('profit_factor',0):.2f})")
 
@@ -1050,8 +1224,8 @@ class ForexBot:
                     self.logger.warning(f"Retrain failed for {Timeframe.LABELS.get(tf, tf)}: {e}")
                     try:
                         ensembles[tf] = self.model_manager.load_latest_for_timeframe(tf)
-                    except Exception:
-                        pass
+                    except Exception as load_e:
+                        self.logger.warning(f"Failed to load fallback ensemble for {Timeframe.LABELS.get(tf, tf)}: {load_e}")
                     continue
 
             keep_versions = set()
@@ -1063,8 +1237,8 @@ class ForexBot:
                 if v and v not in keep_versions and v != "none":
                     try:
                         self.model_manager.delete_version(v)
-                    except Exception:
-                        pass
+                    except Exception as del_e:
+                        self.logger.warning(f"Failed to delete rejected version {v}: {del_e}")
 
             if ensembles:
                 self.ml_predictor = MLPredictor(ensembles)
@@ -1118,8 +1292,11 @@ class ForexBot:
         mistake_report = self.mistake_analyzer.analyze_losses(self.trade_logger.get_closed_trades())
 
         has_analysis = len(self._last_analysis) > 0
+        uptime_sec = (datetime.now() - self._start_time).total_seconds()
+        uptime_str = f"{int(uptime_sec//3600):02d}:{int((uptime_sec%3600)//60):02d}:{int(uptime_sec%60):02d}"
         state = {
             "analysis_ready": has_analysis,
+            "uptime": uptime_str,
             "balance": self._account_info.get("balance", 0),
             "equity": self._account_info.get("equity", 0),
             "margin": self._account_info.get("margin", 0),
@@ -1148,6 +1325,15 @@ class ForexBot:
             "pair_skills": pair_skills,
             "mistake_summary": mistake_report.get("summary", ""),
         }
+
+        readiness = estimate_real_readiness(
+            trades=self.trade_logger.get_closed_trades(),
+            current_dd=acct_status.get("current_drawdown", 0),
+        )
+        state["real_readiness_score"] = readiness["score"]
+        state["real_readiness_eta"] = readiness["eta_str"]
+        state["real_readiness_bar"] = readiness["bar"]
+        state["real_readiness_detail"] = readiness["detail"]
 
         for symbol, analysis in self._last_analysis.items():
             state["symbol"] = symbol
@@ -1226,7 +1412,37 @@ class ForexBot:
             if tick:
                 state["current_price"] = tick.get("bid", 0)
 
+        state["last_signals"] = [
+            {
+                "direction": t.get("direction", "N/A"),
+                "symbol": t.get("symbol", "N/A"),
+                "profit": t.get("profit", 0),
+                "exit_time": str(t.get("exit_time", ""))[:16],
+            }
+            for t in self.trade_logger.get_closed_trades()[-5:]
+        ]
+
         self.dashboard.update(state)
+
+        if self._tiktok_mode:
+            closed_trades = self.trade_logger.get_closed_trades()
+            bot_trades = [t for t in closed_trades if t.get("exit_reason") != "MT5"]
+            streak = 0
+            for t in reversed(bot_trades):
+                if t.get("profit", 0) > 0:
+                    streak += 1
+                elif t.get("profit", 0) < 0:
+                    break
+            self.tiktok_dashboard.set_win_streak(streak)
+            if bot_trades:
+                bot_wins = sum(1 for t in bot_trades if t.get("profit", 0) > 0)
+                bot_wr = min(100, max(0, bot_wins / len(bot_trades) * 100))
+                state["win_rate"] = bot_wr
+                state["total_trades"] = len(bot_trades)
+            else:
+                state["win_rate"] = 0
+                state["total_trades"] = 0
+            self.tiktok_dashboard.update(state)
 
     async def shutdown(self, reason: str = "User request"):
         self.logger.info(f"Initiating graceful shutdown: {reason}")
@@ -1584,54 +1800,232 @@ async def cmd_download(bot: ForexBot, args: argparse.Namespace):
     await bot.shutdown(reason="Download complete")
 
 
+async def cmd_simulate(bot: ForexBot, args: argparse.Namespace):
+    from simulation.simulator import Simulator
+    from learning.trade_outcome_trainer import TradeOutcomeTrainer
+    from simulation.dashboard_panel import render_simulation_panel
+
+    symbol = args.pair or bot._symbols[0]
+    days = args.days or 180
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+
+    bot.logger.info("=" * 50)
+    bot.logger.info(f"SELF-LEARN SIMULATION: {symbol} ({days} days)")
+    bot.logger.info("=" * 50)
+
+    sim = Simulator(
+        symbol=symbol,
+        from_date=start_date,
+        to_date=end_date,
+        initial_balance=10000,
+        volume_fixed=0.01,
+        pair_suffix="",
+        decision_engine=bot.decision_engine if hasattr(bot, 'decision_engine') else None,
+    )
+    result = await sim.run()
+
+    trades = result.get("trades", [])
+    print(f"\nSimulation: {symbol} | {start_date.date()} to {end_date.date()}")
+    print(f"  Candles processed: {result.get('total_candles_processed', 0)}")
+    print(f"  Trades: {result.get('total_trades', 0)} ({result.get('trades_opened', 0)} opened)")
+    print(f"  Win Rate: {result.get('stats', {}).get('win_rate', 0)*100:.1f}%")
+    print(f"  Profit Factor: {result.get('stats', {}).get('profit_factor', 0):.2f}")
+    print(f"  Sharpe: {result.get('stats', {}).get('sharpe_ratio', 0):.2f}")
+    print(f"  Max DD: {result.get('stats', {}).get('max_drawdown_pct', 0)*100:.1f}%")
+    print(f"  Net Profit: ${result.get('stats', {}).get('net_profit', 0):.2f}")
+    print(f"  Skill: {result.get('learning', {}).get('skill', {}).get('level', 'N/A')} "
+          f"({result.get('learning', {}).get('skill', {}).get('score', 0)}/100)")
+    print(f"  Readiness: {result.get('learning', {}).get('real_account_readiness', 'N/A')}")
+
+    if trades:
+        by_side = {}
+        for t in trades:
+            s = t.get("side", "")
+            by_side.setdefault(s, {"total": 0, "wins": 0})
+            by_side[s]["total"] += 1
+            if t.get("net_pnl", 0) > 0:
+                by_side[s]["wins"] += 1
+        for s, d in by_side.items():
+            wr = d["wins"] / d["total"] * 100 if d["total"] > 0 else 0
+            print(f"  {s}: {d['total']} trades, WR={wr:.1f}%")
+
+    sim_trades = result.get("trades", [])
+    sim_trades_with_feat = sum(1 for t in sim_trades if t.get("feature_vector"))
+    print(f"\n  Trades with feature vector: {sim_trades_with_feat}/{len(sim_trades)}")
+
+    print("\n" + render_simulation_panel(result))
+    bot._simulation_result = result
+    await bot.shutdown(reason="Simulation complete")
+
+
+async def cmd_self_learn(bot: ForexBot, args: argparse.Namespace):
+    from simulation.simulator import Simulator
+    from learning.trade_outcome_trainer import TradeOutcomeTrainer
+    from ml.trainer import ModelTrainer
+    from ml.ensemble import VotingEnsemble
+
+    symbol = args.pair or bot._symbols[0]
+    days = args.days or 180
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+
+    bot.logger.info("=" * 50)
+    bot.logger.info(f"SELF-LEARN FULL PIPELINE: {symbol} ({days} days)")
+    bot.logger.info("=" * 50)
+
+    if args.fast_mode:
+        bot.logger.info("FAST MODE enabled: skipping LSTM, using single TF ensemble")
+        if hasattr(bot, 'decision_engine') and bot.decision_engine is not None:
+            from ml.predictor import MLPredictor
+            old_ensembles = bot.decision_engine.ml_predictor._ensembles
+            m5_ensemble = old_ensembles.get(5) or list(old_ensembles.values())[0]
+            m5_models = {k: v for k, v in m5_ensemble.models.items() if k != "lstm"}
+            if len(m5_models) < len(m5_ensemble.models):
+                bot.logger.info(f"  Removed LSTM from ensemble, keeping: {list(m5_models.keys())}")
+            m5_ensemble.models = m5_models
+            m5_ensemble.weights = {k: m5_ensemble.weights.get(k, 1.0) for k in m5_models}
+            fast_ensembles = {5: m5_ensemble}
+            bot.decision_engine.ml_predictor = MLPredictor(fast_ensembles)
+            bot.logger.info(f"  Fast MLPredictor: 1 ensemble (M5 only)")
+
+    sim_cache = Path(f"data/sim_cache_{symbol}.json")
+    if sim_cache.exists() and getattr(args, 'resume', False):
+        bot.logger.info(f"Resuming from cached simulation data ({sim_cache})")
+        with open(sim_cache) as f:
+            sim_result = json.loads(f.read())
+        sim_trades = sim_result.get("trades", [])
+    else:
+        bot.logger.info("Phase 1/3: Running simulation...")
+        sim = Simulator(
+            symbol=symbol,
+            from_date=start_date,
+            to_date=end_date,
+            initial_balance=10000,
+            volume_fixed=0.01,
+            pair_suffix="",
+            decision_engine=bot.decision_engine if hasattr(bot, 'decision_engine') else None,
+        )
+        sim_result = await sim.run()
+        sim_trades = sim_result.get("trades", [])
+        feat_count = sum(1 for t in sim_trades if t.get("feature_vector"))
+        bot.logger.info(f"Simulation: {len(sim_trades)} trades ({feat_count} with feature vectors)")
+
+        if not sim_trades or feat_count == 0:
+            bot.logger.warning("No trades or feature vectors from simulation, aborting")
+            await bot.shutdown(reason="Self-learn: no sim trades")
+            return
+
+        # Cache sim result so Phase 3 can be retried without re-running simulation
+        try:
+            sim_cache.parent.mkdir(parents=True, exist_ok=True)
+            with open(sim_cache, 'w') as f:
+                f.write(json.dumps(sim_result, default=str))
+            bot.logger.info(f"Simulation data cached to {sim_cache}")
+        except Exception as e:
+            bot.logger.warning(f"Could not cache simulation data: {e}")
+
+    bot.logger.info("Phase 2/3: Converting simulation trades to training data...")
+    tot = TradeOutcomeTrainer()
+
+    bot.logger.info("Phase 3/3: Retraining models with sim data...")
+    trained_timeframes = bot.model_manager.get_trained_timeframes() or [
+        bot._tf_to_minutes(tf) for tf in config.trading["timeframes"]
+    ]
+    for tf in trained_timeframes:
+        tf_label = Timeframe.LABELS.get(tf, str(tf))
+        bot.logger.info(f"  {tf_label}: loading data...")
+        df = bot.data_engine.get_historical_data(symbol, tf, years=1)
+        if df.empty:
+            bot.logger.warning(f"  {tf_label}: no data, skipping")
+            continue
+        try:
+            X, y, features, df_clean = bot.model_trainer.prepare_training_data(
+                df, pair=symbol, timeframe=tf,
+            )
+        except Exception as e:
+            bot.logger.warning(f"  {tf_label}: prepare failed: {e}")
+            continue
+
+        # Convert simulation trades using the SAME feature set as the training data
+        X_sim, y_sim = tot.convert_from_simulation(sim_result, features, pair=symbol)
+        bot.logger.info(f"  {tf_label}: {len(y_sim)} sim samples "
+                        f"(BUY={(y_sim==0).sum()} SELL={(y_sim==1).sum()} HOLD={(y_sim==2).sum()})")
+
+        recency = ModelTrainer.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
+        X, y, sw = tot.merge_with_ohlc(X, y, X_sim, y_sim, upsample_wins=True, win_weight=2.0)
+
+        bot.logger.info(f"  {tf_label}: {len(X)} samples — training...")
+        bot.model_trainer.ensemble = VotingEnsemble()
+        results = bot.model_trainer.train_all_models(
+            X, y, feature_cols=features, recency_weights=recency,
+            trade_outcome_weights=sw, tf_label=tf_label,
+        )
+        if bot.model_trainer.get_ensemble().get_num_models() > 0:
+            version = bot.model_manager.save_ensemble(
+                bot.model_trainer.get_ensemble(), timeframe=tf
+            )
+            bot.logger.info(f"  {tf_label}: model saved as v{version}")
+
+    bot.logger.info("Self-learn complete!")
+    await bot.shutdown(reason="Self-learn complete")
+
+
 async def cmd_backtest(bot: ForexBot, args: argparse.Namespace):
     bot.logger.info("=" * 50)
-    bot.logger.info("BACKTEST MODE")
+    bot.logger.info("BACKTEST MODE (Multi-TF)")
     bot.logger.info("=" * 50)
 
     symbol = args.pair or bot._symbols[0]
     days = args.days or config.training.get("historical_years", 2) * 365
+    from_storage = getattr(args, "from_storage", False)
 
-    bot.logger.info(f"Running backtest on {symbol} (days={days})")
+    bot.logger.info(f"Running backtest on {symbol} (days={days}, from_storage={from_storage})")
 
     from backtest.backtest_engine import BacktestEngine
 
-    all_trades = []
-    for tf in bot._timeframes:
-        tf_label = Timeframe.LABELS.get(tf, str(tf))
-        bot.logger.info(f"  {tf_label}: loading data & running backtest...")
-        try:
-            bt = BacktestEngine(
-                data_engine=bot.data_engine,
-                ml_predictor=bot.ml_predictor,
-                feature_pipeline=bot.feature_pipeline,
-                trend_analyzer=bot.trend_analyzer,
-                vol_analyzer=bot.vol_analyzer,
-                momentum_analyzer=bot.momentum_analyzer,
-                regime_detector=bot.regime_detector,
-                market_scorer=bot.market_scorer,
-                news_analyzer=bot.news_analyzer,
-            )
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
-            result = bt.run_backtest(symbol, tf, start_date, end_date)
-            trades = result.get("trades", [])
-            all_trades.extend(trades)
-            bot.logger.info(f"  {tf_label}: {len(trades)} trades, return={result.get('total_return', 0):.1f}%")
-        except Exception as e:
-            bot.logger.warning(f"  {tf_label}: error — {e}")
+    bt = BacktestEngine(
+        data_engine=bot.data_engine,
+        ml_predictor=bot.ml_predictor,
+        feature_pipeline=bot.feature_pipeline,
+        trend_analyzer=bot.trend_analyzer,
+        vol_analyzer=bot.vol_analyzer,
+        momentum_analyzer=bot.momentum_analyzer,
+        regime_detector=bot.regime_detector,
+        market_scorer=bot.market_scorer,
+        news_analyzer=bot.news_analyzer,
+        decision_engine=bot.decision_engine if hasattr(bot, "decision_engine") else None,
+        from_storage=from_storage,
+    )
 
-    if all_trades:
-        perf_result = bot.performance_analyzer.analyze_trades(all_trades)
-        print(f"\nBacktest Results ({len(all_trades)} total trades):")
-        print(f"  Win Rate:      {perf_result.get('win_rate', 0):.1f}%")
-        print(f"  Profit Factor: {perf_result.get('profit_factor', 0):.2f}")
-        print(f"  Sharpe Ratio:  {perf_result.get('sharpe_ratio', 0):.2f}")
-        print(f"  Max DD:        {perf_result.get('max_drawdown', 0):.1f}%")
-        print(f"  Expectancy:    {perf_result.get('expectancy', 0):.4f}")
-        print(f"  Total P&L:     ${perf_result.get('total_profit', 0):.2f}")
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    result = bt.run_backtest(symbol, Timeframe.M5, start_date, end_date)
+
+    trades = result.get("trades", [])
+    if trades:
+        print(f"\n=== Backtest Results ({symbol}) ===")
+        print(f"  Period:        {start_date.date()} to {end_date.date()}")
+        print(f"  Trades:        {len(trades)}")
+        print(f"  Win Rate:      {result.get('win_rate', 0):.1f}%")
+        print(f"  Profit Factor: {result.get('profit_factor', 0):.2f}")
+        print(f"  Sharpe Ratio:  {result.get('sharpe_ratio', 0):.2f}")
+        print(f"  Max DD:        {result.get('max_drawdown', 0):.1f}%")
+        print(f"  Expectancy:    {result.get('expectancy', 0):.4f}")
+        print(f"  Net Profit:    ${result.get('net_profit', 0):.2f}")
+        print(f"  Total Return:  {result.get('total_return', 0):.1f}%")
+        print(f"  Final Balance: ${result.get('final_balance', 0):.2f}")
+
+        tp_trades = [t for t in trades if t.get("exit_reason") == "take_profit"]
+        sl_trades = [t for t in trades if t.get("exit_reason") == "stop_loss"]
+        time_trades = [t for t in trades if t.get("exit_reason") == "time_exit"]
+        print(f"\n  Exit breakdown:")
+        print(f"    Take Profit: {len(tp_trades)}")
+        print(f"    Stop Loss:   {len(sl_trades)}")
+        print(f"    Time Exit:   {len(time_trades)}")
+        print(f"    End of BT:   {len([t for t in trades if t.get('exit_reason') == 'end_of_backtest'])}")
     else:
-        print("\nNo trades generated in backtest.")
+        print(f"\nNo trades generated in backtest for {symbol}.")
 
     await bot.shutdown(reason="Backtest complete")
 
@@ -1639,7 +2033,7 @@ async def cmd_backtest(bot: ForexBot, args: argparse.Namespace):
 async def main():
     parser = argparse.ArgumentParser(description="AI Forex Trading Bot v2")
     parser.add_argument("command", nargs="?", default="live",
-                        choices=["live", "train", "backtest", "validate", "promote", "rollback", "status", "download"],
+                        choices=["live", "train", "backtest", "validate", "promote", "rollback", "status", "download", "simulate", "self-learn"],
                         help="Command to run (default: live)")
     parser.add_argument("--force", "-f", action="store_true", help="Force action (bypass safety checks)")
     parser.add_argument("--pair", type=str, default=None, help="Symbol/pair to operate on")
@@ -1653,11 +2047,18 @@ async def main():
                         help="Comma-separated timeframes (e.g. 5,15,30)")
     parser.add_argument("--all", action="store_true", help="Apply to all timeframes")
     parser.add_argument("--from-storage", action="store_true", help="Train from stored data only (no MT5 download)")
+    parser.add_argument("--tiktok", action="store_true", help="TikTok mode: simplified dashboard + sound effects")
+    parser.add_argument("--fast-mode", action="store_true", help="Fast mode: skip LSTM, use single TF ensemble")
+    parser.add_argument("--resume", action="store_true", help="Resume self-learn from cached simulation data (skip Phase 1)")
 
     args = parser.parse_args()
 
     bot = ForexBot()
     try:
+        if args.tiktok:
+            bot._tiktok_mode = True
+            sound_utils.set_enabled(True)
+            bot.dashboard.hide()
         await bot.initialize()
         bot.dashboard.display()
 
@@ -1676,6 +2077,10 @@ async def main():
             await cmd_download(bot, args)
         elif cmd == "backtest":
             await cmd_backtest(bot, args)
+        elif cmd == "simulate":
+            await cmd_simulate(bot, args)
+        elif cmd == "self-learn":
+            await cmd_self_learn(bot, args)
         else:
             await bot.run()
     except asyncio.CancelledError:
@@ -1689,8 +2094,8 @@ async def main():
         logger.error(f"Fatal error: {e}", exc_info=True)
         try:
             await bot.shutdown(reason=f"Fatal error: {type(e).__name__}")
-        except Exception:
-            pass
+        except Exception as shutdown_e:
+            logger.error(f"Shutdown after fatal error also failed: {shutdown_e}")
     else:
         await bot.shutdown(reason="Normal exit")
 

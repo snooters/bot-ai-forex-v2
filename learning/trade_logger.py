@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from core.constants import TRADE_HISTORY_DIR
+from learning.trade_quality import TradeQualityScorer
 from utils.logger import get_logger
 
 
@@ -16,6 +17,7 @@ class TradeLogger:
         self._trade_dir.mkdir(parents=True, exist_ok=True)
         self._trades: List[Dict] = []
         self._load_existing()
+        self._quality_scorer = TradeQualityScorer()
 
     def _load_existing(self):
         trade_file = self._trade_dir / "trade_history.json"
@@ -80,6 +82,8 @@ class TradeLogger:
                 if "JPY" in trade.get("symbol", "").upper():
                     pips = pips / 100
                 trade["profit_pips"] = pips
+
+                trade["quality_score"] = self._quality_scorer.score_trade(trade)
 
                 self._save()
                 self.logger.info(
@@ -198,6 +202,11 @@ class TradeLogger:
                 profit = entry_deal.get("profit", 0) + entry_deal.get("swap", 0) + entry_deal.get("commission", 0)
                 exit_price = entry_price
                 exit_ts = entry_ts
+
+            # Skip trades with zero profit and no price movement (demo MT5 often has no P&L data)
+            if profit == 0 and abs(float(exit_price) - float(entry_price)) < 1e-8:
+                self.logger.debug(f"Skipping MT5 sync: no profit data for ticket {ticket}")
+                continue
 
             trade_record = {
                 "ticket": ticket,

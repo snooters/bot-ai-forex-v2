@@ -70,7 +70,9 @@ class MultiTimeframeData:
 
 
 class DataLoader:
-    def __init__(self, symbol: str = "EURUSD.fl"):
+    def __init__(self, symbol: str = ""):
+        if not symbol:
+            symbol = config.trading["pairs"][0] if config.trading["pairs"] else "EURUSD"
         self.logger = get_logger("data_loader")
         self.symbol = symbol
         self._base_dir = Path(HISTORICAL_DIR) / symbol
@@ -152,41 +154,40 @@ class DataLoader:
     ) -> pd.DataFrame:
         result = df_aligned.copy()
         for tf in CONTEXT_TFS:
-            ctx_suffix = f"_tf{tf}"
-            trend_col = f"trend{tf}"
-            vol_col = f"volatility{tf}"
-            close_col = f"close{ctx_suffix}"
-            high_col = f"high{ctx_suffix}"
-            low_col = f"low{ctx_suffix}"
-
-            if close_col not in result.columns:
+            ctx = self._load_parquet(tf)
+            if ctx is None or ctx.empty:
                 continue
+            ctx_orig = ctx.sort_values("time").set_index("time")
 
-            ema20_col = f"ema_20{ctx_suffix}"
-            result[ema20_col] = (
-                result[close_col].ewm(span=20, adjust=False).mean()
-            )
-            result[trend_col] = np.where(
-                result[close_col] > result[ema20_col], 1,
-                np.where(result[close_col] < result[ema20_col], -1, 0),
-            )
+            ema20 = ctx_orig["close"].ewm(span=20, adjust=False).mean()
+            trend = np.where(ctx_orig["close"] > ema20, 1,
+                             np.where(ctx_orig["close"] < ema20, -1, 0))
+            vol = (ctx_orig["high"] - ctx_orig["low"]).rolling(14).mean() / ctx_orig["close"].rolling(14).mean()
+            mom = ctx_orig["close"].pct_change(periods=3, fill_method=None)
+            feat = pd.DataFrame({
+                f"trend{tf}": trend,
+                f"volatility{tf}": vol,
+                f"momentum{tf}": mom,
+            }, index=ctx_orig.index)
+            result["_time_key"] = result["time"]
+            result = result.merge(feat, left_on="time", right_index=True, how="left")
 
-            atr_raw = (
-                result[high_col] - result[low_col]
-            ).rolling(14).mean()
-            result[vol_col] = atr_raw / result[close_col].rolling(14).mean()
+        ctx_cols = [c for c in result.columns
+                    if any(c.startswith(p) for p in ("trend", "volatility", "momentum"))]
+        for c in ctx_cols:
+            result[c] = result[c].ffill()
 
-            mom_col = f"momentum{tf}"
-            result[mom_col] = (
-                result[close_col].pct_change(periods=3)
-            )
+        if "_time_key" in result.columns:
+            result.drop(columns=["_time_key"], inplace=True)
 
         return result
 
 
 def load_multi_tf(
-    symbol: str = "EURUSD.fl",
+    symbol: str = "",
 ) -> pd.DataFrame:
+    if not symbol:
+        symbol = config.trading["pairs"][0] if config.trading["pairs"] else "EURUSD"
     loader = DataLoader(symbol)
     aligned = loader.load_aligned()
     return loader.get_context_features(aligned)

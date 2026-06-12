@@ -87,9 +87,23 @@ class LSTMModel:
         return self.model
 
     @safe_execute(default_return=None, raise_on_error=True)
-    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None, progress_callback=None):
-        if self.model is None:
+    def train(self, X_train, y_train, X_val=None, y_val=None, sample_weight=None,
+              progress_callback=None, init_model=None):
+        """Train LSTM model.
+        
+        Args:
+            init_model: Optional existing LSTM model to continue training from (warm-start).
+                        If provided, uses lower learning rate for fine-tuning.
+        """
+        if init_model is not None:
+            # Warm-start: use existing model weights
+            self.model = init_model
+            self._trained = True
+            self._n_features = X_train.shape[1]
+            self.logger.info("LSTM warm-start: continuing from existing model (fine-tuning mode)")
+        elif self.model is None:
             self.create_model(n_features=X_train.shape[1])
+            
         import torch
         import torch.nn as nn
         from torch.utils.data import DataLoader, TensorDataset
@@ -111,7 +125,9 @@ class LSTMModel:
         dataset = TensorDataset(X_t, y_t)
         loader = DataLoader(dataset, batch_size=min(64, len(X_t)), shuffle=False)
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=1e-5)
+        # Lower learning rate for warm-start fine-tuning
+        learning_rate = 0.0003 if init_model is not None else 0.001
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-5)
         criterion = nn.CrossEntropyLoss()
 
         n_epochs = 50
@@ -199,21 +215,38 @@ class LSTMModel:
         if X.ndim == 1:
             X = X.reshape(1, -1)
 
-        self._history.append(X[-1])
+        n_samples = X.shape[0]
+        uniform = np.array([[1 / 3, 1 / 3, 1 / 3]], dtype=np.float32)
 
-        if len(self._history) < self._sequence_length:
-            return np.array([[1 / 3, 1 / 3, 1 / 3]], dtype=np.float32)
+        if n_samples == 1:
+            self._history.append(X[0])
+            if len(self._history) < self._sequence_length:
+                return uniform
+            seq = np.array(list(self._history)[-self._sequence_length:], dtype=np.float32)
+            X_seq = seq.reshape(1, self._sequence_length, self._n_features or seq.shape[1])
+            self.model.eval()
+            with torch.no_grad():
+                X_t = torch.FloatTensor(np.ascontiguousarray(X_seq)).to(self._device)
+                outputs = self.model(X_t)
+                probs = torch.softmax(outputs, dim=1)
+            return probs.cpu().numpy()
 
-        seq = np.array(list(self._history)[-self._sequence_length:], dtype=np.float32)
-        X_seq = seq.reshape(1, self._sequence_length, self._n_features or seq.shape[1])
+        results = np.zeros((n_samples, 3), dtype=np.float32)
+        for i in range(n_samples):
+            self._history.append(X[i])
+            if len(self._history) < self._sequence_length:
+                results[i] = uniform[0]
+                continue
+            seq = np.array(list(self._history)[-self._sequence_length:], dtype=np.float32)
+            X_seq = seq.reshape(1, self._sequence_length, self._n_features or seq.shape[1])
+            self.model.eval()
+            with torch.no_grad():
+                X_t = torch.FloatTensor(np.ascontiguousarray(X_seq)).to(self._device)
+                outputs = self.model(X_t)
+                probs = torch.softmax(outputs, dim=1)
+            results[i] = probs.cpu().numpy()[0]
 
-        self.model.eval()
-        with torch.no_grad():
-            X_t = torch.FloatTensor(np.ascontiguousarray(X_seq)).to(self._device)
-            outputs = self.model(X_t)
-            probs = torch.softmax(outputs, dim=1)
-
-        return probs.cpu().numpy()
+        return results
 
     @safe_execute(default_return=None, raise_on_error=True)
     def predict(self, X):

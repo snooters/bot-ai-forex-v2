@@ -88,6 +88,7 @@ class RiskManager:
             leverage=account_info.get("leverage", 100),
             volatility_multiplier=vol_mult,
             aggressiveness_mult=aggr_mult,
+            symbol=symbol,
         )
 
         risk_amount = balance * risk_pct

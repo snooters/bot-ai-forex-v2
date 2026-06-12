@@ -12,9 +12,15 @@ from core.exceptions import ModelTrainingError
 from features.feature_pipeline import FeaturePipeline
 from ml.ensemble import VotingEnsemble
 from learning.trade_memory import TradeMemory
+from learning.trade_outcome_trainer import TradeOutcomeTrainer
 from learning.mistake_weighting import MistakeWeighting
 from utils.logger import get_logger
 from utils.decorators import measure_time, safe_execute
+
+
+# Target max features to reduce overfitting
+# 115 raw features → top 40 by importance keeps signal, reduces noise
+MAX_FEATURES_TARGET = 40
 
 
 class ModelTrainer:
@@ -24,6 +30,7 @@ class ModelTrainer:
         self.ensemble = VotingEnsemble()
         self.trade_memory = trade_memory
         self.mistake_weighting = MistakeWeighting(trade_memory) if trade_memory else None
+        self.trade_outcome_trainer = TradeOutcomeTrainer(trade_memory) if trade_memory else None
 
     def _create_model_instance(self, name: str):
         try:
@@ -43,14 +50,77 @@ class ModelTrainer:
             self.logger.warning(f"Cannot create {name} model: {e}")
             return None
 
+    def _load_feature_importance(self, pair: str, timeframe: int) -> Optional[Dict[str, float]]:
+        """Load saved feature importance from latest training run (if any)."""
+        try:
+            results_dir = Path(RESULTS_DIR) / pair / str(timeframe)
+            if not results_dir.exists():
+                return None
+            versions = sorted(results_dir.iterdir(), reverse=True)
+            for v_dir in versions:
+                fi_file = v_dir / "feature_importance.csv"
+                if fi_file.exists():
+                    fi_df = pd.read_csv(fi_file)
+                    if "feature" in fi_df.columns and "importance" in fi_df.columns:
+                        fi_dict = dict(zip(fi_df["feature"], fi_df["importance"]))
+                        self.logger.info(f"Loaded feature importance from {fi_file} ({len(fi_dict)} features)")
+                        return fi_dict
+            return None
+        except Exception as e:
+            self.logger.debug(f"Could not load feature importance: {e}")
+            return None
+
+    def _select_top_features(
+        self,
+        available_cols: List[str],
+        importance: Optional[Dict[str, float]],
+        max_features: int = MAX_FEATURES_TARGET,
+    ) -> List[str]:
+        """Select top N features by importance. Falls back to all if no importance data.
+
+        If NEW features are detected (not in importance dict), ALL features are used
+        so the new features get properly evaluated and ranked.
+        """
+        if importance is None:
+            self.logger.info(f"No feature importance available — using all {len(available_cols)} features")
+            return available_cols
+
+        # Check for new features not in importance dict
+        new_features = [c for c in available_cols if c not in importance]
+        if new_features:
+            self.logger.info(
+                f"Found {len(new_features)} new features not in importance dict — "
+                f"using ALL {len(available_cols)} features for this training run "
+                f"(new: {new_features})"
+            )
+            return available_cols
+
+        scored = [(col, importance.get(col, 0.0)) for col in available_cols]
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        if len(scored) <= max_features:
+            self.logger.info(f"Only {len(scored)} features available — using all")
+            return available_cols
+
+        selected = [col for col, _ in scored[:max_features]]
+        dropped = len(available_cols) - len(selected)
+        self.logger.info(
+            f"Feature selection: {len(selected)}/{len(available_cols)} features kept "
+            f"(dropped {dropped} low-importance features)"
+        )
+        return selected
+
     @measure_time
     def prepare_training_data(
         self,
         df: pd.DataFrame,
         lookahead: int = LOOKAHEAD_5,
-        buy_threshold: float = 0.001,
-        sell_threshold: float = 0.001,
+        buy_threshold: float = 0.0004,
+        sell_threshold: float = 0.0004,
         target_type: str = "class",
+        max_features: int = MAX_FEATURES_TARGET,
+        pair: str = "EURUSD",
+        timeframe: Optional[int] = None,
     ) -> Tuple[np.ndarray, np.ndarray, List[str], pd.DataFrame]:
         if df.empty or len(df) < 250:
             raise ModelTrainingError(f"Insufficient data: {len(df)} rows")
@@ -58,9 +128,14 @@ class ModelTrainer:
         df = self.feature_pipeline.compute_all(df)
         feature_cols = self.feature_pipeline.get_feature_columns()
         available_cols = [c for c in feature_cols if c in df.columns]
-        self.ensemble.feature_cols = available_cols
 
-        df = df.dropna(subset=available_cols).copy()
+        # Load importance from previous training and select top features
+        importance = self._load_feature_importance(pair, timeframe or 5)
+        selected_cols = self._select_top_features(available_cols, importance, max_features)
+        self.ensemble.feature_cols = selected_cols
+
+        # Drop NaN on the SELECTED columns (models will only use these)
+        df = df.dropna(subset=selected_cols).copy()
         if df.empty or len(df) < 200:
             raise ModelTrainingError("Insufficient data after cleaning")
 
@@ -76,7 +151,8 @@ class ModelTrainer:
             y[future_return < -sell_threshold] = 1
             y[(future_return >= -sell_threshold) & (future_return <= buy_threshold)] = 2
 
-        X = df[available_cols].values
+        # Train on selected features only — consistent with feature_cols
+        X = df[selected_cols].values
         mask = ~np.isnan(y) & ~np.isnan(X).any(axis=1)
         X = X[mask]
         y = y[mask]
@@ -86,12 +162,57 @@ class ModelTrainer:
             raise ModelTrainingError(f"Too few training samples: {len(X)}")
 
         if target_type != "regression":
-            self.logger.info(f"Prepared {len(X)} training samples with {len(available_cols)} features. "
+            self.logger.info(f"Prepared {len(X)} training samples with {len(selected_cols)} features "
+                             f"(selected from {len(available_cols)} avail). "
                              f"BUY: {(y==0).sum()}, SELL: {(y==1).sum()}, HOLD: {(y==2).sum()}")
         else:
-            self.logger.info(f"Prepared {len(X)} training samples with {len(available_cols)} features (regression). "
+            self.logger.info(f"Prepared {len(X)} training samples with {len(selected_cols)} features "
+                             f"(selected from {len(available_cols)} avail, regression). "
                              f"return range=[{y.min():.4f}, {y.max():.4f}]")
-        return X, y, available_cols, df_clean
+        return X, y, selected_cols, df_clean
+
+    def incorporate_trade_outcomes(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_cols: List[str],
+        pair: str,
+        timeframe: Optional[int] = None,
+        min_trades: int = 10,
+        upsample_wins: bool = True,
+        win_weight: float = 2.0,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Merge trade-outcome training samples into OHLC-derived data.
+
+        Closes the loop: real trade results become additional labeled samples.
+        Returns (X, y, sample_weights) with trade data integrated.
+        """
+        if self.trade_outcome_trainer is None:
+            self.logger.info("No trade_outcome_trainer available, skipping")
+            return X, y, np.ones(len(y))
+
+        trades = self.trade_outcome_trainer.get_recent_trades(
+            pair=pair, timeframe=timeframe, min_trades=min_trades,
+        )
+        if not trades:
+            self.logger.info("No recent closed trades for %s, skipping outcome incorporation", pair)
+            return X, y, np.ones(len(y))
+
+        stats = self.trade_outcome_trainer.get_trade_quality_stats(trades)
+        self.logger.info("Trade outcome stats for %s: %s", pair, stats)
+
+        X_trade, y_trade = self.trade_outcome_trainer.convert_to_samples(
+            trades, feature_cols,
+        )
+        if len(X_trade) == 0:
+            self.logger.info("No valid trade samples could be created")
+            return X, y, np.ones(len(y))
+
+        X_merged, y_merged, w_merged = self.trade_outcome_trainer.merge_with_ohlc(
+            X, y, X_trade, y_trade,
+            upsample_wins=upsample_wins, win_weight=win_weight,
+        )
+        return X_merged, y_merged, w_merged
 
     def _compute_sample_weights(self, y: np.ndarray, multiplier: float = 1.0) -> np.ndarray:
         classes, counts = np.unique(y, return_counts=True)
@@ -133,7 +254,17 @@ class ModelTrainer:
                          progress=None,
                          tf_label=None,
                          target_type: str = "class",
-                         recency_weights: Optional[np.ndarray] = None) -> Dict:
+                         recency_weights: Optional[np.ndarray] = None,
+                         trade_outcome_weights: Optional[np.ndarray] = None,
+                         existing_ensemble: Optional[VotingEnsemble] = None,
+                         is_warm_start: bool = False) -> Dict:
+        """Train all enabled models with optional warm-start from existing ensemble.
+        
+        Args:
+            existing_ensemble: If provided, models continue training from these existing models.
+            is_warm_start: If True, uses reduced n_estimators/epochs for fine-tuning
+                           (warm-start mode) rather than full training from scratch.
+        """
         y_effective = y.copy()
         if self.mistake_weighting and feature_cols:
             y_effective = self.mistake_weighting.adjust_labels(X, y_effective, feature_cols)
@@ -151,6 +282,12 @@ class ModelTrainer:
             sample_weight = sample_weight * rw_train
             self.logger.info(f"Recency weights applied: "
                              f"range=[{rw_train.min():.2f}, {rw_train.max():.2f}]")
+
+        if trade_outcome_weights is not None:
+            tow_train = trade_outcome_weights[:split_idx]
+            sample_weight = sample_weight * tow_train
+            self.logger.info(f"Trade outcome weights applied: "
+                             f"range=[{tow_train.min():.2f}, {tow_train.max():.2f}]")
 
         if self.mistake_weighting and feature_cols:
             sample_weight = self.mistake_weighting.compute_weights(
@@ -172,11 +309,32 @@ class ModelTrainer:
             model_names.append("random_forest")
         if ml_config["enable_lightgbm"]:
             model_names.append("lightgbm")
+        # LSTM hanya untuk timeframe H1 (60) ke atas — terlalu heavy untuk M5/M15
         if ml_config.get("enable_lstm", True):
-            model_names.append("lstm")
+            tf_label_lower = (tf_label or "").lower()
+            # Cegah LSTM di timeframe rendah: cek dari parameter atau label
+            is_low_tf = False
+            if tf_label_lower:
+                if any(x in tf_label_lower for x in ["m5", "m15", "m30"]):
+                    is_low_tf = True
+            if not is_low_tf:
+                model_names.append("lstm")
+            else:
+                self.logger.info(f"Skipping LSTM for low timeframe {tf_label} (too heavy, prone to overfit)")
 
         for name in model_names:
             try:
+                # ── Warm-start: use existing trained model if available ──
+                init_model = None
+                if existing_ensemble is not None and name in existing_ensemble.models:
+                    existing_model = existing_ensemble.models[name]
+                    if existing_model.is_trained:
+                        init_model = existing_model.model
+                        self.logger.info(
+                            f"{name}: warm-start from existing model "
+                            f"(trained={existing_model.is_trained})"
+                        )
+
                 self.logger.info(f"Training {name}...")
                 model = self._create_model_instance(name)
                 if model is None:
@@ -184,28 +342,59 @@ class ModelTrainer:
                     results["models"][name] = {"error": "not available"}
                     continue
 
-                params = model_params.get(name, {})
-                model.create_model(**params)
+                if init_model is not None:
+                    # Warm-start: load existing model state into model instance
+                    # The model instance already has load() — we borrow the loaded model
+                    model.model = init_model
+                    model._trained = True
+                    self.logger.info(f"{name}: loaded existing model for continued training")
+                else:
+                    params = model_params.get(name, {}).copy()
+                    if name == "lstm":
+                        params["n_features"] = X.shape[1]
+                    model.create_model(**params)
+
                 if hasattr(model, "_available") and not model._available:
                     self.logger.warning(f"Skipping {name}: not available")
                     results["models"][name] = {"error": "not available"}
                     continue
 
                 if progress and tf_label:
-                    n_est = model.model.get_params().get("n_estimators", 200) if hasattr(model, "model") and model.model else 200
-                    if hasattr(model, "model") and model.model and hasattr(model.model, "get_params"):
+                    n_est = 200
+                    if model.model and hasattr(model.model, "get_params"):
                         try:
                             n_est = model.model.get_params().get("n_estimators", 200)
                         except Exception:
                             pass
-                    if name == "random_forest":
-                        cb_total = n_est
-                    else:
-                        cb_total = n_est
-                    progress.begin_model(name, total=cb_total)
+                    progress.begin_model(name, total=n_est)
 
-                result = model.train(X_train, y_train, X_val, y_val, sample_weight=sample_weight,
-                                     progress_callback=progress.make_model_callback(name) if (progress and tf_label) else None)
+                try:
+                    result = model.train(X_train, y_train, X_val, y_val, sample_weight=sample_weight,
+                                         progress_callback=progress.make_model_callback(name) if (progress and tf_label) else None,
+                                         init_model=model.model if init_model is not None else None)
+                except Exception as e:
+                    if init_model is not None:
+                        # Warm-start failed — retry from scratch
+                        self.logger.warning(
+                            f"{name}: warm-start failed ({e}), retrying from scratch..."
+                        )
+                        model = self._create_model_instance(name)
+                        if model is not None:
+                            params = model_params.get(name, {}).copy()
+                            if name == "lstm":
+                                params["n_features"] = X.shape[1]
+                            model.create_model(**params)
+                            result = model.train(
+                                X_train, y_train, X_val, y_val,
+                                sample_weight=sample_weight,
+                                progress_callback=progress.make_model_callback(name) if (progress and tf_label) else None,
+                                init_model=None,
+                            )
+                        else:
+                            raise
+                    else:
+                        raise
+
                 results["models"][name] = result
                 self.ensemble.register_model(name, model)
 
@@ -231,6 +420,21 @@ class ModelTrainer:
             results["ensemble"]["active_models"] = self.ensemble.get_active_models()
             self.logger.info(f"Ensemble ready with {self.ensemble.get_num_models()} models")
 
+            try:
+                val_probas = self.ensemble.predict_proba(X_val)
+                from ml.probability_calibrator import ProbabilityCalibrator
+                calibrator = ProbabilityCalibrator(method="platt")
+                calibrator.train(y_val, val_probas)
+                results["calibration"] = {
+                    "brier_score": calibrator.brier_score,
+                    "ece": calibrator.ece,
+                }
+                self.ensemble.calibrator = calibrator
+                self.logger.info(f"Calibration: Brier={calibrator.brier_score:.4f} ECE={calibrator.ece:.4f}")
+            except Exception as e:
+                self.logger.warning(f"Calibration training failed: {e}")
+                results["calibration"] = {"error": str(e)}
+
         return results
 
     def save_feature_importance(self, ensemble: VotingEnsemble, feature_cols: List[str],
@@ -246,8 +450,11 @@ class ModelTrainer:
         importance_dir = Path(RESULTS_DIR) / pair / str(timeframe) / version
         importance_dir.mkdir(parents=True, exist_ok=True)
 
+        # Collect importances from trained models (only available for selected features)
         all_fi = {}
-        for name, model in ensemble.get_active_models().items():
+        for name, model in ensemble.models.items():
+            if not model.is_trained:
+                continue
             if hasattr(model.model, "feature_importances_"):
                 fi = model.model.feature_importances_
                 if len(fi) == len(feature_cols):
@@ -257,10 +464,32 @@ class ModelTrainer:
             self.logger.warning("No feature importances available from any model")
             return
 
+        # Get ALL possible features from the pipeline for metadata
+        all_possible = self.feature_pipeline.get_feature_columns()
+
         avg_fi = {}
         for col in feature_cols:
+            # Only save features that were actually trained
             vals = [all_fi[m][col] for m in all_fi if col in all_fi[m]]
-            avg_fi[col] = sum(vals) / len(vals) if vals else 0.0
+            if vals:
+                avg_fi[col] = sum(vals) / len(vals)
+
+        # Fill missing features with minimum importance so they're not dropped next time
+        if avg_fi:
+            min_imp = min(avg_fi.values()) * 0.5
+        else:
+            min_imp = 0.001
+
+        for col in all_possible:
+            if col not in avg_fi:
+                avg_fi[col] = min_imp
+
+        trained_count = len([c for c in feature_cols if c in avg_fi])
+        seeded_count = len(all_possible) - trained_count
+        self.logger.info(
+            f"Saving feature importance: {len(avg_fi)} total "
+            f"({trained_count} trained + {seeded_count} seeded at {min_imp:.6f})"
+        )
 
         fi_df = pd.DataFrame(avg_fi.items(), columns=["feature", "importance"])
         fi_df = fi_df.sort_values("importance", ascending=False)

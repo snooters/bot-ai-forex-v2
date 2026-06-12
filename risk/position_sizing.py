@@ -7,15 +7,46 @@ from utils.logger import get_logger
 
 class PositionSizer:
     BALANCE_TIERS = [
-        (0, 200, 0.0025, 0.01),
-        (200, 500, 0.0035, 0.02),
-        (500, 2000, 0.0050, 0.05),
-        (2000, 5000, 0.0050, 0.20),
-        (5000, float("inf"), 0.0050, 0.50),
+        (0, 200, 0.0050, 0.02),
+        (200, 500, 0.0080, 0.05),
+        (500, 2000, 0.0100, 0.10),
+        (2000, 5000, 0.0100, 0.30),
+        (5000, float("inf"), 0.0100, 0.50),
     ]
 
     def __init__(self):
         self.logger = get_logger("position_sizer")
+        self._symbol_info_cache: Dict[str, dict] = {}
+
+    def _get_symbol_info(self, symbol: str) -> Optional[Dict]:
+        if symbol in self._symbol_info_cache:
+            return self._symbol_info_cache[symbol]
+        try:
+            from data.mt5_connector import MT5Connector
+            connector = MT5Connector()
+            info = connector.get_symbol_info(symbol)
+            if info:
+                self._symbol_info_cache[symbol] = info
+            return info
+        except Exception as sym_e:
+            self.logger.debug(f"Symbol info unavailable: {sym_e}")
+            return None
+
+    def _normalize_volume(self, volume: float, symbol: str) -> float:
+        info = self._get_symbol_info(symbol)
+        if info:
+            min_vol = info.get("min_volume", 0.01)
+            max_vol = info.get("max_volume", 100.0)
+            vol_step = info.get("volume_step", 0.01)
+            volume = max(volume, min_vol)
+            volume = min(volume, max_vol)
+            volume = round(round(volume / vol_step) * vol_step, 8)
+            volume = round(volume, 10)
+            volume = max(volume, min_vol)
+        else:
+            volume = max(volume, 0.01)
+            volume = round(volume, 2)
+        return volume
 
     def get_balance_tier_risk_pct(self, balance: float) -> float:
         for lo, hi, risk, _ in self.BALANCE_TIERS:
@@ -38,6 +69,7 @@ class PositionSizer:
         leverage: int = 100,
         volatility_multiplier: float = 1.0,
         aggressiveness_mult: float = 1.0,
+        symbol: str = "",
     ) -> float:
         if stop_loss_pips <= 0 or pip_val <= 0:
             return 0.01
@@ -49,13 +81,16 @@ class PositionSizer:
         risk_amount = min(risk_amount, max_risk)
 
         contract_size = 100000
-        lot_size = risk_amount / (stop_loss_pips * pip_val * (contract_size / 100000))
+        lot_size = risk_amount / (stop_loss_pips * pip_val * contract_size)
 
         max_lot = self.get_balance_tier_max_lot(balance)
         lot_size = min(lot_size, max_lot)
 
-        lot_size = max(lot_size, 0.01)
-        lot_size = round(lot_size, 2)
+        if symbol:
+            lot_size = self._normalize_volume(lot_size, symbol)
+        else:
+            lot_size = max(lot_size, 0.01)
+            lot_size = round(lot_size, 2)
 
         self.logger.info(
             f"Position sizing: balance=${balance:.2f}, risk={effective_risk*100:.2f}%, "
@@ -112,6 +147,7 @@ class PositionSizer:
         lot_size: float,
         atr: float,
         avg_atr: float,
+        symbol: str = "",
     ) -> float:
         if avg_atr <= 0:
             return lot_size
@@ -120,6 +156,8 @@ class PositionSizer:
             lot_size *= 1.2 / vol_ratio
         elif vol_ratio < 0.8:
             lot_size *= min(1.3, 0.8 / vol_ratio)
+        if symbol:
+            return self._normalize_volume(lot_size, symbol)
         return round(max(lot_size, 0.01), 2)
 
     def calculate_position_value(self, lot_size: float, entry_price: float, contract_size: int = 100000) -> float:

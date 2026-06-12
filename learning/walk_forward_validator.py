@@ -17,8 +17,27 @@ from utils.helpers import (
 from utils.logger import get_logger
 
 
-PF_THRESHOLD = 1.2
-DD_THRESHOLD = 0.15
+PF_THRESHOLD = 1.5
+DD_THRESHOLD = 0.10
+
+
+def _get_ensemble_feature_count(ensemble) -> int:
+    """Get number of features the ensemble's models were trained with."""
+    if ensemble is None:
+        return 0
+    for name, model in ensemble.models.items():
+        if hasattr(model, 'model') and model.model is not None:
+            m = model.model
+            if hasattr(m, 'n_features_in_'):
+                return m.n_features_in_
+            if hasattr(m, '_Booster') and hasattr(m._Booster, 'num_feature'):
+                try:
+                    return m._Booster.num_feature()
+                except Exception:
+                    pass
+            if hasattr(m, 'n_estimators') and hasattr(m, 'feature_importances_'):
+                return len(m.feature_importances_)
+    return 0
 
 
 class WalkForwardValidator:
@@ -34,7 +53,7 @@ class WalkForwardValidator:
         timeframe_label: str,
         window_size_months: int = 12,
         step_months: int = 6,
-        min_train_years: int = 4,
+        min_train_years: float = 0.75,
     ) -> Dict:
         if df.empty or len(df) < 1000:
             return self._empty_result("insufficient data (<1000 rows)")
@@ -48,19 +67,15 @@ class WalkForwardValidator:
         min_date = df["_date"].min()
         max_date = df["_date"].max()
         total_span = (max_date - min_date).days / 365.25
-        if total_span < 5:
+        if total_span < 0.5:
             return self._empty_result(f"data span too short ({total_span:.1f} years, need >=5)")
 
-        df_feat = self.feature_pipeline.compute_all(df.copy())
-
-        available_cols = self.feature_pipeline.get_feature_columns()
-        available_cols = [c for c in available_cols if c in df_feat.columns]
-
-        windows = self._build_windows(df_feat, min_train_years)
+        windows = self._build_windows(df, min_train_years)
         if not windows:
             return self._empty_result("no valid walk-forward windows")
 
-        self.logger.info(f"Built {len(windows)} walk-forward windows for {timeframe_label}")
+        self.logger.info(f"Built {len(windows)} walk-forward windows for {timeframe_label}"
+                         f" (features=computed-per-window)")
 
         all_results = []
         for i, (train_end, val_start, val_end, test_start, test_end) in enumerate(windows):
@@ -71,25 +86,53 @@ class WalkForwardValidator:
                 f"test={test_start.date()}..{test_end.date()}"
             )
 
-            train_df = df_feat[df_feat["_date"] <= train_end].copy()
-            val_df = df_feat[(df_feat["_date"] >= val_start) & (df_feat["_date"] <= val_end)].copy()
-            test_df = df_feat[(df_feat["_date"] >= test_start) & (df_feat["_date"] <= test_end)].copy()
+            # Compute features PER SPLIT — each window gets independent feature computation
+            train_raw = df[df["_date"] <= train_end].copy()
+            val_raw = df[df["_date"] <= val_end].copy()
+            test_raw = df[df["_date"] <= test_end].copy()
+
+            train_feat = self.feature_pipeline.compute_all(train_raw)
+            val_feat = self.feature_pipeline.compute_all(val_raw)
+            test_feat = self.feature_pipeline.compute_all(test_raw)
+
+            train_df = train_feat[train_feat["_date"] <= train_end].copy()
+            val_df = val_feat[(val_feat["_date"] >= val_start) & (val_feat["_date"] <= val_end)].copy()
+            test_df = test_feat[(test_feat["_date"] >= test_start) & (test_feat["_date"] <= test_end)].copy()
 
             if len(train_df) < 500 or len(val_df) < 100 or len(test_df) < 100:
                 self.logger.warning(f"  Window {i+1}: insufficient data, skipping")
                 continue
 
+            available_cols = [c for c in self.feature_pipeline.get_feature_columns() if c in train_df.columns]
+            if not available_cols:
+                self.logger.warning(f"  Window {i+1}: no feature columns, skipping")
+                continue
+
+            # Save original feature_cols BEFORE prepare_training_data overwrites them
+            original_fcols = list(getattr(ensemble, 'feature_cols', []) or [])
+            if not original_fcols:
+                original_fcols = list(available_cols)
+
             try:
                 X_train, y_train, _, _ = trainer.prepare_training_data(train_df, lookahead=LOOKAHEAD_5)
             except Exception as e:
-                self.logger.warning(f"  Window {i+1}: train prep failed — {e}")
+                results.append(self._empty_result(f"  Window {window_idx + 1}: train data prep failed: {e}"))
                 continue
 
-            test_clean = test_df.dropna(subset=available_cols).copy()
+            # Use the ORIGINAL feature_cols from the trained ensemble (not re-selected ones)
+            ef_cols = original_fcols if len(original_fcols) == _get_ensemble_feature_count(ensemble) else (ensemble.feature_cols or available_cols)
+
+            # Ensure test data has all required features (fill missing with 0 like predictor)
+            test_clean = test_df.copy()
+            missing_cols = [c for c in ef_cols if c not in test_clean.columns]
+            if missing_cols:
+                for col in missing_cols:
+                    test_clean[col] = 0.0
+            test_clean = test_clean.dropna(subset=ef_cols)
             if test_clean.empty or len(test_clean) < 20:
                 continue
 
-            y_true, oos_X = self._prepare_labels(test_clean, available_cols)
+            y_true, oos_X = self._prepare_labels(test_clean, ef_cols)
             if len(oos_X) < 10:
                 continue
 
@@ -99,7 +142,7 @@ class WalkForwardValidator:
                 self.logger.warning(f"  Window {i+1}: prediction failed — {e}")
                 continue
 
-            val_result = self._validate_split(val_df, ensemble, available_cols)
+            val_result = self._validate_split(val_df, ensemble, ef_cols)
             test_result = self._run_test(oos_X, y_true, preds, test_clean)
 
             window_result = {
@@ -128,8 +171,13 @@ class WalkForwardValidator:
 
         return self._aggregate_results(all_results, timeframe_label)
 
+    def _build_windows_by_date(
+        self, df: pd.DataFrame, min_train_years: int = 0.75
+    ) -> List[Tuple]:
+        return self._build_windows(df, min_train_years)
+
     def _build_windows(
-        self, df: pd.DataFrame, min_train_years: int = 4
+        self, df: pd.DataFrame, min_train_years: int = 0.75
     ) -> List[Tuple]:
         df_sorted = df.sort_values("_date")
         min_date = df_sorted["_date"].min()
@@ -138,12 +186,13 @@ class WalkForwardValidator:
         min_train_months = int(min_train_years * 12)
         total_months = int((max_date - min_date).days / 30.44)
 
-        if total_months < min_train_months + 6:
+        test_months = 2
+        val_months = 2
+
+        if total_months < min_train_months + val_months + test_months:
             return []
 
         windows = []
-        test_months = 3
-        val_months = 3
 
         for train_end_offset in range(min_train_months, total_months - test_months, val_months + test_months):
             train_end = min_date + pd.DateOffset(months=train_end_offset)
@@ -165,22 +214,27 @@ class WalkForwardValidator:
         if not windows:
             train_end = min_date + pd.DateOffset(months=min_train_months)
             val_start = train_end + pd.Timedelta(hours=1)
-            val_end = val_start + pd.DateOffset(months=6)
+            val_end = val_start + pd.DateOffset(months=val_months)
             test_start = val_end + pd.Timedelta(hours=1)
-            test_end = test_start + pd.DateOffset(months=6)
+            test_end = test_start + pd.DateOffset(months=test_months)
             if test_end <= max_date:
                 windows.append((train_end, val_start, val_end, test_start, test_end))
 
         return windows
 
     def _validate_split(
-        self, val_df: pd.DataFrame, ensemble: VotingEnsemble, available_cols: List[str]
+        self, val_df: pd.DataFrame, ensemble: VotingEnsemble, feature_cols: List[str]
     ) -> Dict:
-        val_clean = val_df.dropna(subset=available_cols).copy()
+        val_clean = val_df.copy()
+        missing_cols = [c for c in feature_cols if c not in val_clean.columns]
+        if missing_cols:
+            for col in missing_cols:
+                val_clean[col] = 0.0
+        val_clean = val_clean.dropna(subset=feature_cols)
         if val_clean.empty or len(val_clean) < 10:
             return {"accuracy": 0}
 
-        y_true_val, X_val = self._prepare_labels(val_clean, available_cols)
+        y_true_val, X_val = self._prepare_labels(val_clean, feature_cols)
         if len(X_val) < 10:
             return {"accuracy": 0}
 
@@ -202,8 +256,9 @@ class WalkForwardValidator:
         y_true[future_return < -0.001] = 1
         y_true[(future_return >= -0.001) & (future_return <= 0.001)] = 2
 
-        mask = ~np.isnan(y_true)
-        X = df[available_cols].values[mask]
+        X_df = df[available_cols].apply(pd.to_numeric, errors='coerce')
+        mask = ~np.isnan(y_true) & ~X_df.isna().any(axis=1)
+        X = X_df.values[mask].astype(np.float64)
         y_true = y_true[mask]
         return y_true, X
 
@@ -377,11 +432,8 @@ class WalkForwardValidator:
                 return True
             return False
 
-        if total_trades < 3:
-            return accuracy >= 85
-
-        if directional < 10:
-            return accuracy >= 75
+        if total_trades < 50:
+            return False
 
         pf_ok = pf >= PF_THRESHOLD * 0.8
         dd_ok = max_dd_pct <= DD_THRESHOLD * 120

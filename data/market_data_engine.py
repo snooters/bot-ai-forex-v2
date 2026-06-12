@@ -75,6 +75,32 @@ class MarketDataEngine:
                 return stored.iloc[-count:].reset_index(drop=True)
             return pd.DataFrame()
 
+    async def get_rates_async(
+        self, symbol: str, timeframe: int, count: int = 100,
+        use_cache: bool = True, force_refresh: bool = False,
+    ) -> pd.DataFrame:
+        if use_cache and not force_refresh:
+            cached = self.cache.get(symbol, timeframe)
+            if cached is not None and len(cached) >= count:
+                return cached.iloc[-count:].reset_index(drop=True)
+        try:
+            df = await self.connector.async_get_rates(symbol, timeframe, count=count)
+            if not df.empty:
+                self.storage.append_data(symbol, timeframe, df)
+                self.cache.set(symbol, timeframe, df)
+            return df
+        except MT5DataError as e:
+            is_live = config.account["trading_mode"] == "live"
+            if is_live:
+                self.logger.warning(f"LIVE: data unavailable for {symbol} tf={timeframe} — {e}")
+                return pd.DataFrame()
+            self.logger.warning(f"get_rates failed for {symbol} tf={timeframe}: {e}")
+            stored = self.storage.load_data(symbol, timeframe)
+            if not stored.empty and len(stored) >= count:
+                self.logger.info(f"Using cached data for {symbol} tf={timeframe}")
+                return stored.iloc[-count:].reset_index(drop=True)
+            return pd.DataFrame()
+
     async def get_historical_data_async(
         self, symbol: str, timeframe: int, years: int = 2,
         max_rows: int = 10000,

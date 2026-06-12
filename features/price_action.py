@@ -26,102 +26,81 @@ class PriceActionEngine:
         return df
 
     def _detect_liquidity_grab(self, df: pd.DataFrame):
+        if len(df) < 3:
+            return
+        high = df["high"].values
+        low = df["low"].values
+        close = df["close"].values
+        open_ = df["open"].values if "open" in df.columns else close
+        pa = df["price_action"].values
+
         for i in range(3, len(df)):
-            prev_high = df["high"].iloc[i - 1]
-            prev_low = df["low"].iloc[i - 1]
-            curr_high = df["high"].iloc[i]
-            curr_low = df["low"].iloc[i]
-            curr_close = df["close"].iloc[i]
-            curr_open = df["open"].iloc[i] if "open" in df.columns else df["close"].iloc[i]
-
-            if i >= 2:
-                high_2 = df["high"].iloc[i - 2]
-                low_2 = df["low"].iloc[i - 2]
-
-                if (
-                    curr_high > high_2 and
-                    curr_high > prev_high and
-                    curr_close < prev_high and
-                    curr_low < curr_open
-                ):
-                    df.at[df.index[i], "price_action"] = PriceActionPattern.LIQUIDITY_GRAB.value
-
-                if (
-                    curr_low < low_2 and
-                    curr_low < prev_low and
-                    curr_close > prev_low and
-                    curr_high > curr_open
-                ):
-                    df.at[df.index[i], "price_action"] = PriceActionPattern.LIQUIDITY_GRAB.value
+            if (high[i] > high[i - 2] and high[i] > high[i - 1] and
+                close[i] < high[i - 1] and low[i] < open_[i]):
+                pa[i] = PriceActionPattern.LIQUIDITY_GRAB.value
+            elif (low[i] < low[i - 2] and low[i] < low[i - 1] and
+                  close[i] > low[i - 1] and high[i] > open_[i]):
+                pa[i] = PriceActionPattern.LIQUIDITY_GRAB.value
 
     def _detect_rejection(self, df: pd.DataFrame):
-        for i in range(1, len(df)):
-            body = abs(df["close"].iloc[i] - df["open"].iloc[i]) if "open" in df.columns else 0
-            upper_wick = df["high"].iloc[i] - max(df["close"].iloc[i], df["open"].iloc[i]) if "open" in df.columns else 0
-            lower_wick = min(df["close"].iloc[i], df["open"].iloc[i]) - df["low"].iloc[i] if "open" in df.columns else 0
-            total_range = df["high"].iloc[i] - df["low"].iloc[i]
+        if len(df) < 1 or "open" not in df.columns:
+            return
+        open_ = df["open"].values
+        high = df["high"].values
+        low = df["low"].values
+        close = df["close"].values
+        pa = df["price_action"].values
 
-            if total_range == 0:
-                continue
+        body = np.abs(close - open_)
+        upper_wick = high - np.maximum(close, open_)
+        lower_wick = np.minimum(close, open_) - low
+        total_range = high - low
 
-            if upper_wick > 2 * body and upper_wick > 0.5 * total_range:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.REJECTION.value
-
-            if lower_wick > 2 * body and lower_wick > 0.5 * total_range:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.REJECTION.value
+        mask = total_range > 0
+        up_mask = mask & (upper_wick > 2 * body) & (upper_wick > 0.5 * total_range)
+        lo_mask = mask & (lower_wick > 2 * body) & (lower_wick > 0.5 * total_range)
+        pa[up_mask | lo_mask] = PriceActionPattern.REJECTION.value
 
     def _detect_retest(self, df: pd.DataFrame):
-        for i in range(3, len(df)):
-            prev_high = df["high"].iloc[i - 1]
-            prev_low = df["low"].iloc[i - 1]
-            curr_close = df["close"].iloc[i]
+        if len(df) < 3:
+            return
+        close = df["close"].values
+        prev_high = np.roll(df["high"].values, 1)
+        prev_low = np.roll(df["low"].values, 1)
+        prev_high[:1] = np.nan
+        prev_low[:1] = np.nan
+        pa = df["price_action"].values
 
-            if abs(curr_close - prev_high) / prev_high < 0.001:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.RETEST.value
-
-            if abs(curr_close - prev_low) / prev_low < 0.001:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.RETEST.value
+        mask_high = (np.abs(close - prev_high) / np.where(prev_high == 0, 1e-10, prev_high)) < 0.001
+        mask_low = (np.abs(close - prev_low) / np.where(prev_low == 0, 1e-10, prev_low)) < 0.001
+        pa[mask_high | mask_low] = PriceActionPattern.RETEST.value
 
     def _detect_momentum_candle(self, df: pd.DataFrame):
-        for i in range(1, len(df)):
-            if "open" not in df.columns:
-                continue
-            body = abs(df["close"].iloc[i] - df["open"].iloc[i])
-            avg_body = df["close"].diff().abs().rolling(20).mean().iloc[i]
-
-            if avg_body == 0 or pd.isna(avg_body):
-                continue
-
-            if body > avg_body * 2:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.MOMENTUM_CANDLE.value
+        if "open" not in df.columns:
+            return
+        body = (df["close"] - df["open"]).abs()
+        avg_body = body.rolling(20, min_periods=1).mean()
+        cond = (body > avg_body * 2) & (avg_body > 0)
+        df.loc[cond, "price_action"] = PriceActionPattern.MOMENTUM_CANDLE.value
 
     def _detect_breakout(self, df: pd.DataFrame):
-        for i in range(5, len(df)):
-            range_high = df["high"].iloc[i - 5:i].max()
-            range_low = df["low"].iloc[i - 5:i].min()
-            curr_close = df["close"].iloc[i]
-            curr_open = df["open"].iloc[i] if "open" in df.columns else df["close"].iloc[i]
-
-            if curr_close > range_high and curr_open < range_high:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.BREAKOUT.value
-
-            if curr_close < range_low and curr_open > range_low:
-                df.at[df.index[i], "price_action"] = PriceActionPattern.BREAKOUT.value
+        range_high = df["high"].rolling(5, min_periods=5).max()
+        range_low = df["low"].rolling(5, min_periods=5).min()
+        open_ = df["open"] if "open" in df.columns else df["close"]
+        cond_buy = (df["close"] > range_high) & (open_ < range_high)
+        cond_sell = (df["close"] < range_low) & (open_ > range_low)
+        df.loc[cond_buy | cond_sell, "price_action"] = PriceActionPattern.BREAKOUT.value
 
     def _detect_fake_breakout(self, df: pd.DataFrame):
-        for i in range(6, len(df)):
-            range_high = df["high"].iloc[i - 5:i].max()
-            range_low = df["low"].iloc[i - 5:i].min()
+        range_high = df["high"].rolling(5, min_periods=5).max()
+        range_low = df["low"].rolling(5, min_periods=5).min()
+        prev_close = df["close"].shift(1)
+        curr_close = df["close"]
 
-            prev_close = df["close"].iloc[i - 1]
-            prev_open = df["open"].iloc[i - 1] if "open" in df.columns else df["close"].iloc[i - 1]
-            curr_close = df["close"].iloc[i]
-
-            if prev_close > range_high and curr_close < range_high:
-                df.at[df.index[i - 1], "price_action"] = PriceActionPattern.FAKE_BREAKOUT.value
-
-            if prev_close < range_low and curr_close > range_low:
-                df.at[df.index[i - 1], "price_action"] = PriceActionPattern.FAKE_BREAKDOWN.value
+        cond_fake_buy = (prev_close > range_high) & (curr_close < range_high)
+        cond_fake_sell = (prev_close < range_low) & (curr_close > range_low)
+        df.loc[cond_fake_buy, "price_action"] = PriceActionPattern.FAKE_BREAKOUT.value
+        df.loc[cond_fake_sell, "price_action"] = PriceActionPattern.FAKE_BREAKDOWN.value
 
     def get_current_pattern(self, df: pd.DataFrame) -> str:
         if "price_action" not in df.columns:

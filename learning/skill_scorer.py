@@ -184,9 +184,10 @@ class SkillScorer:
         return 0
 
     def _score_consistency(self, version_history: List[Dict]) -> int:
-        if len(version_history) < 2:
+        valid_entries = [h for h in version_history if h.get("oos_score", 0) > 0]
+        if len(valid_entries) < 2:
             return 0
-        recent = version_history[-3:] if len(version_history) >= 3 else version_history
+        recent = valid_entries[-5:] if len(valid_entries) >= 5 else valid_entries
         improvements = 0
         for i in range(1, len(recent)):
             prev_oos = recent[i - 1].get("oos_score", 0)

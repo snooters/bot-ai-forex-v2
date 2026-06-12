@@ -15,6 +15,8 @@ class MT5Connector:
     _connected = False
     _mt5 = None
 
+    SYMBOL_SUFFIXES = ["", ".fl", ".raw", ".ecn", ".pro", ".m", ".fx", ".i", ".MBE"]
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -27,6 +29,7 @@ class MT5Connector:
         self.logger = get_logger("mt5_connector")
         self._account_info = None
         self._mt5_available = False
+        self._symbol_map: dict = {}
         self._try_import_mt5()
 
     def _try_import_mt5(self):
@@ -38,7 +41,38 @@ class MT5Connector:
             self._mt5_available = False
             self.logger.warning("MetaTrader5 not installed. Running in simulation mode.")
 
-    def connect(self) -> bool:
+    def resolve_symbol(self, symbol: str) -> str:
+        if symbol in self._symbol_map:
+            return self._symbol_map[symbol]
+
+        if not self._mt5_available:
+            return symbol
+
+        for suffix in self.SYMBOL_SUFFIXES:
+            candidate = f"{symbol}{suffix}" if suffix else symbol
+            if symbol.endswith(suffix[1:]) and suffix:
+                continue
+            info = self._mt5.symbol_info(candidate)
+            if info is not None:
+                if candidate != symbol:
+                    self.logger.info(f"Symbol '{symbol}' resolved to '{candidate}'")
+                self._symbol_map[symbol] = candidate
+                self._mt5.symbol_select(candidate, True)
+                return candidate
+
+        base = symbol.split(".")[0] if "." in symbol else symbol
+        if base != symbol:
+            info = self._mt5.symbol_info(base)
+            if info is not None:
+                self.logger.info(f"Symbol '{symbol}' resolved to '{base}'")
+                self._symbol_map[symbol] = base
+                self._mt5.symbol_select(base, True)
+                return base
+
+        self._symbol_map[symbol] = symbol
+        return symbol
+
+    def connect(self, max_retries: int = 3, retry_delay: float = 5.0) -> bool:
         if self._connected:
             return True
 
@@ -47,46 +81,62 @@ class MT5Connector:
             self._connected = True
             return True
 
-        self.logger.info("Connecting to MetaTrader 5...")
-        if not self._mt5.initialize():
-            error = self._mt5.last_error()
-            raise MT5ConnectionError(f"MT5 initialize failed: {error}")
+        import time as _time
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.logger.info(f"Connecting to MetaTrader 5 (attempt {attempt}/{max_retries})...")
+                if not self._mt5.initialize():
+                    error = self._mt5.last_error()
+                    raise MT5ConnectionError(f"MT5 initialize failed: {error}")
 
-        acct = config.account
-        if acct["server"]:
-            authorized = self._mt5.login(
-                login=int(acct["user_id"]),
-                password=acct["password"],
-                server=acct["server"]
-            )
-        else:
-            authorized = True
+                acct = config.account
+                if acct["server"]:
+                    authorized = self._mt5.login(
+                        login=int(acct["user_id"]),
+                        password=acct["password"],
+                        server=acct["server"]
+                    )
+                else:
+                    authorized = True
 
-        if not authorized:
-            error = self._mt5.last_error()
-            raise MT5ConnectionError(f"MT5 login failed: {error}")
+                if not authorized:
+                    error = self._mt5.last_error()
+                    raise MT5ConnectionError(f"MT5 login failed: {error}")
 
-        self._account_info = self._mt5.account_info()
-        self.logger.info(f"Logged in. Account: {self._account_info.login}, "
-                         f"Balance: {self._account_info.balance:.2f}")
+                self._account_info = self._mt5.account_info()
+                self.logger.info(f"Logged in. Account: {self._account_info.login}, "
+                                 f"Balance: {self._account_info.balance:.2f}")
 
-        self._enable_symbols()
-        self._wait_terminal_ready()
+                self._enable_symbols()
+                self._wait_terminal_ready()
 
-        self._connected = True
-        return True
+                self._connected = True
+                return True
+
+            except MT5ConnectionError as e:
+                if attempt < max_retries:
+                    self.logger.warning(f"Connection attempt {attempt} failed: {e}. "
+                                       f"Retrying in {retry_delay}s...")
+                    _time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    raise
 
     def _enable_symbols(self):
         symbols = config.trading["pairs"]
+        resolved = []
         for symbol in symbols:
-            if not self._mt5.symbol_select(symbol, True):
-                self.logger.warning(f"Failed to enable symbol {symbol}: {self._mt5.last_error()}")
+            real = self.resolve_symbol(symbol)
+            resolved.append(real)
+            if not self._mt5.symbol_select(real, True):
+                self.logger.warning(f"Failed to enable symbol {real}: {self._mt5.last_error()}")
+        config._config["trading"]["pairs"] = resolved
 
     def _wait_terminal_ready(self, max_wait: int = 30):
         self.logger.info("Waiting for MT5 terminal data feed...")
         import time as _time
         test_symbols = config.trading["pairs"]
-        test_sym = test_symbols[0] if test_symbols else "EURUSD"
+        test_sym = self.resolve_symbol(test_symbols[0]) if test_symbols else "EURUSD"
         for sec in range(max_wait):
             try:
                 tinfo = self._mt5.terminal_info()
@@ -95,8 +145,9 @@ class MT5Connector:
                     if rates is not None and len(rates) > 0:
                         self.logger.info(f"MT5 terminal ready after {sec+1}s")
                         return
-            except Exception:
-                pass
+            except Exception as e:
+                if sec == 0:
+                    self.logger.debug(f"MT5 not ready yet: {e}")
             if sec % 5 == 0 or sec == 0:
                 self.logger.info(f"Waiting for terminal data feed... ({sec+1}s/{max_wait}s)")
             _time.sleep(1)
@@ -126,6 +177,7 @@ class MT5Connector:
         self, symbol: str, timeframe: int, count: int = 100
     ) -> pd.DataFrame:
         is_live = config.account["trading_mode"] == "live"
+        resolved = self.resolve_symbol(symbol)
 
         if not self._mt5_available:
             if is_live:
@@ -135,17 +187,27 @@ class MT5Connector:
             return self._simulate_rates(symbol, timeframe, count)
 
         self.ensure_connected()
-        rates = self._mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+        rates = self._mt5.copy_rates_from_pos(resolved, timeframe, 0, count)
 
         if rates is None or len(rates) == 0:
             error = self._mt5.last_error()
             error_str = str(error) if error else "Unknown"
             if any(x in error_str for x in ["Terminal: Call failed", "Terminal: Invalid params"]):
-                self._mt5.symbol_select(symbol, True)
-                rates = self._mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+                self._mt5.symbol_select(resolved, True)
+                rates = self._mt5.copy_rates_from_pos(resolved, timeframe, 0, count)
                 if rates is not None and len(rates) > 0:
-                    self.logger.info(f"MT5 data recovered after symbol_select for {symbol} tf={timeframe}")
+                    self.logger.info(f"MT5 data recovered after symbol_select for {resolved} tf={timeframe}")
                     return self._rates_to_df(symbol, timeframe, rates)
+
+                if timeframe > 5:
+                    m5_count = count * (timeframe // 5) + 10
+                    m5_rates = self._mt5.copy_rates_from_pos(resolved, 5, 0, m5_count)
+                    if m5_rates is not None and len(m5_rates) > count * (timeframe // 5):
+                        m5_df = self._rates_to_df(symbol, 5, m5_rates)
+                        resampled = self._resample_ohlc(m5_df, timeframe)
+                        self.logger.debug(f"Resampled {symbol} tf={timeframe} from M5 ({len(resampled)} candles)")
+                        return resampled
+
                 if is_live:
                     raise MT5DataError(
                         f"LIVE mode: MT5 terminal not ready for {symbol} tf={timeframe}"
@@ -155,6 +217,11 @@ class MT5Connector:
             raise MT5DataError(f"Failed to get rates for {symbol} tf={timeframe}: {error_str}")
 
         return self._rates_to_df(symbol, timeframe, rates)
+
+    async def async_get_rates(self, symbol: str, timeframe: int, count: int = 100) -> pd.DataFrame:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_rates, symbol, timeframe, count)
 
     def _rates_to_df(self, symbol: str, timeframe: int, rates) -> pd.DataFrame:
 
@@ -170,6 +237,22 @@ class MT5Connector:
         df.drop_duplicates(subset=["time"], keep="last", inplace=True)
         df.reset_index(drop=True, inplace=True)
         return df
+
+    @staticmethod
+    def _resample_ohlc(m5_df: pd.DataFrame, tf_minutes: int) -> pd.DataFrame:
+        rule = f"{tf_minutes}min"
+        resampled = m5_df.resample(rule, on="time").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+            "spread": "mean",
+        })
+        resampled.dropna(subset=["open", "close"], inplace=True)
+        resampled.reset_index(inplace=True)
+        resampled["timeframe"] = tf_minutes
+        return resampled
 
     def _simulate_rates(self, symbol: str, timeframe: int, count: int) -> pd.DataFrame:
         import numpy as np
@@ -230,12 +313,9 @@ class MT5Connector:
         if not self._mt5_available:
             return []
         self.ensure_connected()
-        try:
-            self._mt5.refresh_rates()
-        except Exception:
-            pass
         if symbol:
-            positions = self._mt5.positions_get(symbol=symbol)
+            resolved = self.resolve_symbol(symbol)
+            positions = self._mt5.positions_get(symbol=resolved)
         else:
             positions = self._mt5.positions_get()
         if positions is None:
@@ -256,9 +336,11 @@ class MT5Connector:
         if not self._mt5_available:
             return {"symbol": symbol, "digits": 5, "point": 0.00001, "spread": 2,
                     "spread_float": False, "trade_mode": 0, "min_volume": 0.01,
-                    "max_volume": 100.0, "volume_step": 0.01, "contract_size": 100000}
+                    "max_volume": 100.0, "volume_step": 0.01, "contract_size": 100000,
+                    "stops_level": 0, "freeze_level": 0}
         self.ensure_connected()
-        info = self._mt5.symbol_info(symbol)
+        resolved = self.resolve_symbol(symbol)
+        info = self._mt5.symbol_info(resolved)
         if info is None:
             return None
         return {
@@ -267,6 +349,7 @@ class MT5Connector:
             "trade_mode": info.trade_mode, "min_volume": info.volume_min,
             "max_volume": info.volume_max, "volume_step": info.volume_step,
             "contract_size": info.trade_contract_size,
+            "stops_level": info.trade_stops_level, "freeze_level": info.trade_freeze_level,
         }
 
     def get_symbol_tick(self, symbol: str) -> Optional[Dict]:
@@ -274,13 +357,29 @@ class MT5Connector:
             return {"bid": 1.1000, "ask": 1.1002, "last": 1.1000,
                     "volume": 0, "time": datetime.now()}
         self.ensure_connected()
-        tick = self._mt5.symbol_info_tick(symbol)
+        resolved = self.resolve_symbol(symbol)
+        tick = self._mt5.symbol_info_tick(resolved)
         if tick is None:
             return None
         return {
             "bid": tick.bid, "ask": tick.ask, "last": tick.last,
             "volume": tick.volume, "time": datetime.fromtimestamp(tick.time),
         }
+
+    def _get_filling_type(self, symbol: str):
+        if not self._mt5_available:
+            return self._mt5.ORDER_FILLING_IOC
+        resolved = self.resolve_symbol(symbol)
+        info = self._mt5.symbol_info(resolved)
+        if info is not None:
+            mode = info.filling_mode
+            if mode & 2:
+                return self._mt5.ORDER_FILLING_IOC
+            if mode & 1:
+                return self._mt5.ORDER_FILLING_FOK
+            if mode & 4:
+                return self._mt5.ORDER_FILLING_RETURN
+        return self._mt5.ORDER_FILLING_FOK
 
     def place_order(self, symbol: str, order_type: str, volume: float,
                     price: Optional[float] = None, sl: Optional[float] = None,
@@ -294,26 +393,54 @@ class MT5Connector:
                 "volume": volume, "type": order_type, "symbol": symbol,
             }
         self.ensure_connected()
+        resolved = self.resolve_symbol(symbol)
+        filling = self._get_filling_type(symbol)
         order_type_mt5 = (
             self._mt5.ORDER_TYPE_BUY if order_type.upper() == "BUY"
             else self._mt5.ORDER_TYPE_SELL
         )
         request = {
-            "action": self._mt5.TRADE_ACTION_DEAL, "symbol": symbol,
+            "action": self._mt5.TRADE_ACTION_DEAL, "symbol": resolved,
             "volume": volume, "type": order_type_mt5, "magic": magic,
             "comment": comment, "type_time": self._mt5.ORDER_TIME_GTC,
-            "type_filling": self._mt5.ORDER_FILLING_IOC,
+            "type_filling": filling,
         }
         if order_type.upper() == "BUY":
-            tick = self._mt5.symbol_info_tick(symbol)
+            tick = self._mt5.symbol_info_tick(resolved)
             request["price"] = tick.ask
         else:
-            tick = self._mt5.symbol_info_tick(symbol)
+            tick = self._mt5.symbol_info_tick(resolved)
             request["price"] = tick.bid
+
+        sym_info = self._mt5.symbol_info(resolved)
+        if sym_info is not None:
+            stops_level = sym_info.trade_stops_level
+            point = sym_info.point
+            digits = sym_info.digits
+            min_stop_dist = stops_level * point
+            if min_stop_dist > 0:
+                is_buy = order_type.upper() == "BUY"
+                ref_price = tick.bid if is_buy else tick.ask
+                if sl is not None:
+                    sl_dist = abs(ref_price - sl)
+                    if sl_dist < min_stop_dist:
+                        sl = ref_price - min_stop_dist if is_buy else ref_price + min_stop_dist
+                        sl = round(sl, digits)
+                        self.logger.info(f"Adjusted SL to {sl} (min stop {stops_level} pts from {ref_price})")
+                if tp is not None:
+                    tp_dist = abs(tp - ref_price)
+                    if tp_dist < min_stop_dist:
+                        tp = ref_price + min_stop_dist if is_buy else ref_price - min_stop_dist
+                        tp = round(tp, digits)
+                        self.logger.info(f"Adjusted TP to {tp} (min stop {stops_level} pts from {ref_price})")
+
         if sl is not None:
-            request["sl"] = sl
+            request["sl"] = round(sl, 5)
         if tp is not None:
-            request["tp"] = tp
+            request["tp"] = round(tp, 5)
+        self.logger.debug(f"Order: {order_type} {resolved} vol={volume} "
+                         f"price={request.get('price')} sl={request.get('sl')} "
+                         f"tp={request.get('tp')} fill={filling}")
         result = self._mt5.order_send(request)
         if result is None:
             raise MT5DataError(f"Order send failed: {self._mt5.last_error()}")
@@ -368,18 +495,20 @@ class MT5Connector:
         if not self._mt5_available:
             return True
         self.ensure_connected()
+        resolved = self.resolve_symbol(symbol)
+        filling = self._get_filling_type(symbol)
         order_type = (
             self._mt5.ORDER_TYPE_SELL if position_type.upper() == "BUY"
             else self._mt5.ORDER_TYPE_BUY
         )
-        tick = self._mt5.symbol_info_tick(symbol)
+        tick = self._mt5.symbol_info_tick(resolved)
         price = tick.bid if position_type.upper() == "BUY" else tick.ask
         request = {
-            "action": self._mt5.TRADE_ACTION_DEAL, "symbol": symbol,
+            "action": self._mt5.TRADE_ACTION_DEAL, "symbol": resolved,
             "volume": volume, "type": order_type, "position": ticket,
             "price": price, "magic": 2024001, "comment": "AI_CLOSE",
             "type_time": self._mt5.ORDER_TIME_GTC,
-            "type_filling": self._mt5.ORDER_FILLING_IOC,
+            "type_filling": filling,
         }
         result = self._mt5.order_send(request)
         if result is None or result.retcode != self._mt5.TRADE_RETCODE_DONE:

@@ -87,20 +87,50 @@ class AutoRetrainEngine:
                 sample_weight_multiplier: float = 1.0,
                 model_params: Optional[Dict] = None,
                 progress=None,
-                tf_label=None) -> Dict:
-        self.logger.info(f"Starting auto retrain for timeframe={timeframe} "
+                tf_label=None,
+                pair: Optional[str] = None) -> Dict:
+        self.logger.info(f"Starting auto retrain for {pair} timeframe={timeframe} "
                          f"(weight_mult={sample_weight_multiplier})...")
 
         self.model_trainer.ensemble = VotingEnsemble()
 
+        # ── Warm-start: load best existing model for continued training ──
+        existing_ensemble = None
+        is_warm_start = False
+        if timeframe is not None:
+            try:
+                existing_ensemble = self.model_manager.load_best_ensemble(timeframe)
+                if existing_ensemble is not None:
+                    is_warm_start = True
+                    self.logger.info(
+                        f"Warm-start: loaded best existing ensemble for {tf_label or timeframe} "
+                        f"({existing_ensemble.get_num_models()} models)"
+                    )
+                else:
+                    self.logger.info(f"No existing model for {tf_label or timeframe} — training from scratch")
+            except Exception as e:
+                self.logger.warning(f"Could not load existing ensemble for warm-start: {e}")
+                existing_ensemble = None
+
         try:
-            X, y, features, df_clean = self.model_trainer.prepare_training_data(training_data)
+            X, y, features, df_clean = self.model_trainer.prepare_training_data(
+                training_data, pair=pair, timeframe=timeframe,
+            )
         except Exception as e:
             self.logger.error(f"Failed to prepare training data: {e}")
             return {"success": False, "error": str(e)}
 
         from ml.trainer import ModelTrainer as _MT
         recency = _MT.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
+
+        trade_outcome_weights = None
+        if pair is not None and self.model_trainer.trade_outcome_trainer is not None:
+            try:
+                X, y, trade_outcome_weights = self.model_trainer.incorporate_trade_outcomes(
+                    X, y, features, pair=pair, timeframe=timeframe,
+                )
+            except Exception as e:
+                self.logger.warning(f"Trade outcome incorporation failed: {e}, continuing with OHLC data only")
 
         self.logger.info(f"Training samples: {len(X)} | features: {len(features)} | labels: BUY={(y==0).sum()} SELL={(y==1).sum()} HOLD={(y==2).sum()}")
 
@@ -112,6 +142,8 @@ class AutoRetrainEngine:
                 progress=progress,
                 tf_label=tf_label,
                 recency_weights=recency,
+                trade_outcome_weights=trade_outcome_weights,
+                existing_ensemble=existing_ensemble,
             )
         except Exception as e:
             self.logger.error(f"Failed to train models: {e}")
@@ -121,7 +153,6 @@ class AutoRetrainEngine:
             model_version = self.model_manager.save_ensemble(
                 self.model_trainer.get_ensemble(), timeframe=timeframe
             )
-            self.model_manager.increment_retrain_count(timeframe)
             self._retrain_count += 1
             self._last_retrain_count = self.trade_logger.get_trade_count()
             self._last_retrain_time = datetime.now()

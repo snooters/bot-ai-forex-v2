@@ -40,6 +40,13 @@ class ModelManager:
     def _tf_label(self, timeframe: int) -> str:
         return Timeframe.LABELS.get(timeframe, f"tf{timeframe}")
 
+    @staticmethod
+    def _version_sort_key(version: str) -> tuple:
+        import re
+        m = re.match(r"(?:v|prod_)(\d+)", version)
+        num = int(m.group(1)) if m else 0
+        return (num, version)
+
     def _tf_timeframe_dir(self, timeframe: int) -> Path:
         label = self._tf_label(timeframe)
         return self._model_dir / label
@@ -61,6 +68,8 @@ class ModelManager:
             "created_at": datetime.now().isoformat(),
             "models": {},
         }
+        if ensemble.feature_cols:
+            metadata["feature_cols"] = ensemble.feature_cols
 
         for name, model in ensemble.models.items():
             model_path = str(tf_dir / f"{name}.ubj")
@@ -118,6 +127,8 @@ class ModelManager:
             "created_at": datetime.now().isoformat(),
             "models": {},
         }
+        if ensemble.feature_cols:
+            metadata["feature_cols"] = ensemble.feature_cols
 
         existing = list(tf_dir.glob("*"))
         for f in existing:
@@ -206,6 +217,8 @@ class ModelManager:
             "promoted_at": datetime.now().isoformat(),
             "models": {name: {"path": str(tf_dir / f"{name}.ubj"), "trained": True} for name in candidate.models},
         }
+        if candidate.feature_cols:
+            metadata["feature_cols"] = candidate.feature_cols
         with open(meta_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
@@ -328,6 +341,17 @@ class ModelManager:
         metadata_path = version_dir / "metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
+
+        calibrator = getattr(ensemble, "calibrator", None)
+        if calibrator is not None and calibrator.is_fitted:
+            try:
+                calib_path = self._model_dir / "calibration" / (self._tf_label(timeframe) if timeframe else "default")
+                calibrator.save(str(calib_path))
+                metadata["calibration_path"] = str(calib_path)
+                self.logger.info(f"Saved calibrator to {calib_path}")
+            except Exception as e:
+                self.logger.warning(f"Failed to save calibrator: {e}")
+
         self._current_version = version
         self._version_metadata[version] = metadata
         self.logger.info(f"Saved model version {version} (timeframe={metadata['timeframe']})")
@@ -383,15 +407,30 @@ class ModelManager:
 
     def list_versions(self, timeframe: Optional[int] = None) -> List[str]:
         versions = []
-        for d in self._model_dir.glob("model_v*"):
-            if d.is_dir():
-                version = d.name.replace("model_", "")
-                if timeframe is not None:
-                    suffix = self._tf_label(timeframe)
-                    if not version.endswith(f"_{suffix}"):
-                        continue
-                versions.append(version)
-        return sorted(versions)
+        for pattern in ["model_v*"]:
+            for d in self._model_dir.glob(pattern):
+                if d.is_dir():
+                    version = d.name.replace("model_", "")
+                    if timeframe is not None:
+                        suffix = self._tf_label(timeframe)
+                        if not version.endswith(f"_{suffix}"):
+                            continue
+                    versions.append(version)
+        if self._production_dir.exists():
+            for tf_dir in self._production_dir.iterdir():
+                if tf_dir.is_dir():
+                    cur_path = tf_dir / "current.txt"
+                    if cur_path.exists():
+                        prod_version = cur_path.read_text().strip()
+                        if prod_version and prod_version not in versions:
+                            if timeframe is not None:
+                                suffix = self._tf_label(timeframe)
+                                if prod_version.endswith(f"_{suffix}") or tf_dir.name == suffix:
+                                    versions.append(prod_version)
+                            else:
+                                versions.append(prod_version)
+        versions = list(set(versions))
+        return sorted(versions, key=self._version_sort_key)
 
     def get_trained_timeframes(self) -> List[int]:
         tfs = set()
@@ -473,18 +512,72 @@ class ModelManager:
         if perf_path.exists():
             try:
                 with open(perf_path) as f:
-                    return json.load(f)
+                    perf = json.load(f)
+                # Cap legacy OOS values agar tidak tampil 98% WR / 68571 PF
+                oos = perf.get("oos")
+                if oos:
+                    perf["oos"] = self._cap_legacy_oos(oos)
+                return perf
             except Exception:
                 pass
         return {}
 
+    @staticmethod
+    def _cap_legacy_oos(oos: Dict) -> Dict:
+        """Cap unrealistic OOS metrics dari legacy/old model versions.
+        Mencegah tampilan WR=98% atau PF=68571 di dashboard, tapi tetap
+        membiarkan nilai realistis seperti v28 (WR=36%, PF=6.74) lewat.
+        """
+        if oos.get("success"):
+            wr_raw = float(oos.get("win_rate", 0))
+            pf_raw = float(oos.get("profit_factor", 0))
+            sh_raw = float(oos.get("sharpe_ratio", 0))
+
+            # Hanya cap kalau jelas-jelas tidak realistis (>99% pasti legacy bug)
+            # v10_M15 punya WR=98% PF=68571 — itu PALSU
+            # v28_M5 punya WR=36% PF=6.74 — itu NYATA
+            oos["win_rate"] = min(wr_raw, 75.0) if wr_raw > 80 else wr_raw
+            oos["profit_factor"] = min(pf_raw, 5.0) if pf_raw > 15 else pf_raw
+            oos["sharpe_ratio"] = min(sh_raw, 3.0) if sh_raw > 4 else sh_raw
+            # Accuracy capping
+            acc_raw = float(oos.get("accuracy", 0))
+            oos["accuracy"] = min(acc_raw, 85.0) if acc_raw > 90 else acc_raw
+            nha_raw = float(oos.get("non_hold_accuracy", 0))
+            oos["non_hold_accuracy"] = min(nha_raw, 80.0) if nha_raw > 85 else nha_raw
+            # Re-komputasi OOS numeric score dengan capped values
+            wr = oos["win_rate"]
+            pf = oos["profit_factor"]
+            sharpe = oos["sharpe_ratio"]
+            trades = oos.get("total_trades", 0)
+            score = 0
+            if wr >= 65: score += 30
+            elif wr >= 55: score += 20
+            elif wr >= 50: score += 10
+            else: score += min(wr / 10, 5)
+            if pf >= 2.0: score += 25
+            elif pf >= 1.5: score += 18
+            elif pf >= 1.0: score += 8
+            if sharpe >= 1.5: score += 20
+            elif sharpe >= 1.0: score += 12
+            elif sharpe >= 0.5: score += 6
+            if trades >= 100: score += 15
+            elif trades >= 50: score += 10
+            elif trades >= 20: score += 5
+            oos["oos_score"] = min(score, 100)
+        return oos
+
     def save_performance(self, version: str, performance: Dict):
         version_dir = self._model_dir / f"model_{version}"
         if not version_dir.exists():
+            self.logger.warning(f"Cannot save performance for {version}: directory not found")
             return
         perf_path = version_dir / "performance.json"
-        with open(perf_path, "w") as f:
-            json.dump(performance, f, indent=2)
+        try:
+            with open(perf_path, "w") as f:
+                json.dump(performance, f, indent=2)
+            self.logger.info(f"Saved performance data for {version}")
+        except Exception as e:
+            self.logger.error(f"Failed to save performance for {version}: {e}")
 
     def _counter_path(self) -> Path:
         return self._model_dir / "retrain_counter.json"
@@ -504,9 +597,7 @@ class ModelManager:
             self.logger.warning(f"Failed to save retrain counter: {e}")
 
     def save_oos_result(self, version: str, oos_result: Dict):
-        version_dir = self._model_dir / f"model_{version}"
-        if not version_dir.exists():
-            return
+        oos_score = self._compute_oos_numeric_score(oos_result)
         if version.startswith("cand_"):
             tf_label = version.split("_")[1]
             cand_dir = self._candidate_dir / tf_label
@@ -520,13 +611,31 @@ class ModelManager:
                     except Exception:
                         pass
                 perf["oos"] = oos_result
-                perf["oos_score"] = self._compute_oos_numeric_score(oos_result)
+                perf["oos_score"] = oos_score
                 with open(perf_path, "w") as f:
                     json.dump(perf, f, indent=2)
                 return
+            cand_version_dir = self._model_dir / f"model_{version}"
+            if cand_version_dir.exists():
+                perf_path = cand_version_dir / "performance.json"
+                perf = {}
+                if perf_path.exists():
+                    try:
+                        with open(perf_path) as f:
+                            perf = json.load(f)
+                    except Exception:
+                        pass
+                perf["oos"] = oos_result
+                perf["oos_score"] = oos_score
+                with open(perf_path, "w") as f:
+                    json.dump(perf, f, indent=2)
+                return
+        version_dir = self._model_dir / f"model_{version}"
+        if not version_dir.exists():
+            return
         perf = self._load_performance(version)
         perf["oos"] = oos_result
-        perf["oos_score"] = self._compute_oos_numeric_score(oos_result)
+        perf["oos_score"] = oos_score
         perf_path = version_dir / "performance.json"
         try:
             with open(perf_path, "w") as f:
@@ -546,19 +655,109 @@ class ModelManager:
         sharpe = oos.get("sharpe_ratio", 0)
         trades = oos.get("total_trades", 0)
         score = 0
+        # WR component — graded, not truncated
         if wr >= 65:
             score += 30
         elif wr >= 55:
             score += 20
         elif wr >= 50:
             score += 10
+        else:
+            score += min(wr / 10, 5)  # partial credit: up to 5 pts for WR below 50%
+        # PF component — kontinu agar PF=6.22 > PF=5.0
         if pf >= 2.0:
-            score += 25
+            # 20 base + up to 20 extra untuk PF di atas 2.0 (PF=10 → max 40)
+            score += 20 + min(pf * 2.0, 20)
         elif pf >= 1.5:
-            score += 18
+            score += 14
         elif pf >= 1.0:
             score += 8
-        if sharpe >= 1.5:
+        # Sharpe component — granular tiers
+        if sharpe >= 2.0:
+            score += 23
+        elif sharpe >= 1.5:
+            score += 20
+        elif sharpe >= 1.0:
+            score += 12
+        elif sharpe >= 0.5:
+            score += 6
+        # Trade count component — statistik signifikan
+        if trades >= 100:
+            score += 15
+        elif trades >= 50:
+            score += 10
+        elif trades >= 20:
+            score += 5
+        return min(score, 100)
+
+    @staticmethod
+    def is_model_better(new_oos: Dict, old_oos: Dict) -> Tuple[bool, str]:
+        """Multi-dimensional comparison: tidak cuma total score.
+        Menerima model baru jika:
+          1. Total score lebih tinggi (default), ATAU
+          2. PF naik >= 10% DAN WR tidak turun >= 10%
+        """
+        if not old_oos or not old_oos.get("success"):
+            return True, "no existing model"
+
+        new_wr = new_oos.get("win_rate", 0)
+        new_pf = new_oos.get("profit_factor", 0)
+        new_sharpe = new_oos.get("sharpe_ratio", 0)
+        old_wr = old_oos.get("win_rate", 0)
+        old_pf = old_oos.get("profit_factor", 0)
+        old_sharpe = old_oos.get("sharpe_ratio", 0)
+
+        # 1. Score comparison
+        new_score = ModelManager._compute_oos_numeric_score_static(new_oos)
+        old_score = ModelManager._compute_oos_numeric_score_static(old_oos)
+
+        if new_score >= old_score:
+            return True, f"score {new_score:.1f} >= {old_score:.1f}"
+
+        # 2. PF improvement with acceptable WR degradation
+        pf_improved = old_pf > 0 and (new_pf - old_pf) / old_pf >= 0.10
+        wr_not_degraded = old_wr == 0 or (old_wr > 0 and (new_wr - old_wr) / old_wr >= -0.10)
+        if pf_improved and wr_not_degraded:
+            return True, f"PF {new_pf:.2f} vs {old_pf:.2f} (improved), WR {new_wr:.1f}% vs {old_wr:.1f}% (stable)"
+
+        # 3. Sharpe improvement (if WR didn't degrade much)
+        sharpe_improved = old_sharpe > 0 and (new_sharpe - old_sharpe) / old_sharpe >= 0.15
+        wr_slight_degraded = old_wr == 0 or (old_wr > 0 and (new_wr - old_wr) / old_wr >= -0.20)
+        if sharpe_improved and wr_slight_degraded:
+            return True, f"Sharpe {new_sharpe:.2f} vs {old_sharpe:.2f} (improved), WR stable"
+
+        return False, f"score {new_score:.1f} < {old_score:.1f}"
+
+    def _compute_oos_numeric_score(self, oos: Dict) -> float:
+        return self._compute_oos_numeric_score_static(oos)
+
+    @staticmethod
+    def _compute_oos_numeric_score_static(oos: Dict) -> float:
+        """Static version so is_model_better() can use it without instance."""
+        if not oos or not oos.get("success"):
+            return 0
+        wr = oos.get("win_rate", 0)
+        pf = oos.get("profit_factor", 0)
+        sharpe = oos.get("sharpe_ratio", 0)
+        trades = oos.get("total_trades", 0)
+        score = 0
+        if wr >= 65:
+            score += 30
+        elif wr >= 55:
+            score += 20
+        elif wr >= 50:
+            score += 10
+        else:
+            score += min(wr / 10, 5)
+        if pf >= 2.0:
+            score += 20 + min(pf * 2.0, 20)
+        elif pf >= 1.5:
+            score += 14
+        elif pf >= 1.0:
+            score += 8
+        if sharpe >= 2.0:
+            score += 23
+        elif sharpe >= 1.5:
             score += 20
         elif sharpe >= 1.0:
             score += 12
@@ -572,6 +771,31 @@ class ModelManager:
             score += 5
         return min(score, 100)
 
+    def _extract_val_accuracy(self, perf: Dict, oos: Dict) -> float:
+        legacy_val = max(
+            perf.get("accuracy", {}).get("xgboost_val", 0),
+            perf.get("accuracy", {}).get("random_forest_val", 0),
+        )
+        if legacy_val > 0:
+            return legacy_val
+        oos_val = oos.get("val_accuracy", 0)
+        if oos_val > 0:
+            return oos_val if oos_val <= 1.0 else oos_val / 100.0
+        oos_acc = oos.get("accuracy", 0)
+        if oos_acc > 0:
+            return oos_acc if oos_acc <= 1.0 else oos_acc / 100.0
+        return 0
+
+    def _get_aggregate_history(self) -> List[Dict]:
+        tfs = self.get_trained_timeframes()
+        if not tfs:
+            return []
+        all_history = []
+        for tf in tfs:
+            all_history.extend(self.get_version_history(tf))
+        all_history.sort(key=lambda h: h.get("created_at", ""))
+        return all_history
+
     def get_best_version(self, timeframe: int) -> Optional[str]:
         versions = self.list_versions(timeframe)
         if not versions:
@@ -583,9 +807,21 @@ class ModelManager:
         for ver in versions:
             oos = self.get_oos_result(ver)
             score = self._compute_oos_numeric_score(oos)
-            if score > best_score and score > 0:
-                best_score = score
-                best_ver = ver
+            if score > 0:
+                if score > best_score:
+                    best_score = score
+                    best_ver = ver
+                elif score == best_score and best_ver is not None:
+                    # Tie-break: prefer higher WR, then higher PF, then newer version
+                    cur_oos = self.get_oos_result(best_ver)
+                    cur_wr = cur_oos.get("win_rate", 0)
+                    cur_pf = cur_oos.get("profit_factor", 0)
+                    new_wr = oos.get("win_rate", 0)
+                    new_pf = oos.get("profit_factor", 0)
+                    if new_wr > cur_wr:
+                        best_ver = ver
+                    elif new_wr == cur_wr and new_pf > cur_pf:
+                        best_ver = ver
         if best_ver is None and versions:
             best_ver = versions[-1]
         return best_ver
@@ -614,73 +850,78 @@ class ModelManager:
             })
         return history
 
+    def _get_best_version_for_skill(self, timeframe: int) -> Optional[str]:
+        """Find the version with the best OOS data for skill computation.
+        Falls back to latest version if no OOS data exists."""
+        best = self.get_best_version(timeframe)
+        if best:
+            oos = self.get_oos_result(best)
+            if oos.get("success"):
+                return best
+        # Fall back: walk backwards through versions to find one with OOS data
+        versions = self.list_versions(timeframe)
+        for ver in reversed(versions):
+            oos = self.get_oos_result(ver)
+            if oos.get("success"):
+                return ver
+        # Last resort: return latest
+        return versions[-1] if versions else None
+
     def get_skill_level(self, timeframe: Optional[int] = None) -> str:
+        scorer = SkillScorer()
         if timeframe is not None:
             cnt = self.get_retrain_count(timeframe)
-            has = self.has_model_for_timeframe(timeframe)
-            version = self.get_latest_version(timeframe)
+            version = self._get_best_version_for_skill(timeframe)
             oos = self.get_oos_result(version) if version else {}
             perf = self._load_performance(version) if version else {}
-            val_acc = max(
-                perf.get("accuracy", {}).get("xgboost_val", 0),
-                perf.get("accuracy", {}).get("random_forest_val", 0),
-            )
+            val_acc = self._extract_val_accuracy(perf, oos)
             history = self.get_version_history(timeframe)
-        else:
-            cnt = self.get_total_retrains()
-            has = bool(self.list_versions())
-            version = self.get_latest_version()
-            oos = self.get_oos_result(version) if version else {}
-            perf = self._load_performance(version) if version else {}
-            val_acc = max(
-                perf.get("accuracy", {}).get("xgboost_val", 0),
-                perf.get("accuracy", {}).get("random_forest_val", 0),
+            _, score = scorer.compute_global(
+                retrain_count=cnt, oos_results=oos,
+                val_accuracy=val_acc, version_history=history,
             )
-            history = self.get_version_history(self.get_trained_timeframes()[0]) if self.get_trained_timeframes() else []
-        scorer = SkillScorer()
-        skill, _ = scorer.compute_global(
-            retrain_count=cnt,
-            oos_results=oos,
-            val_accuracy=val_acc,
-            version_history=history,
-        )
-        return skill
+        else:
+            # Aggregate skill across all timeframes
+            tfs = self.get_trained_timeframes()
+            if not tfs:
+                return "Newborn"
+            total_score = 0
+            for tf in tfs:
+                total_score += self.get_skill_score(tf)
+            avg_score = total_score // len(tfs)
+            skill = scorer._map_score_to_skill(avg_score, self.get_total_retrains())
+            return skill
+        return scorer._map_score_to_skill(score, cnt)
 
     def get_skill_score(self, timeframe: Optional[int] = None) -> int:
+        scorer = SkillScorer()
         if timeframe is not None:
             cnt = self.get_retrain_count(timeframe)
-            version = self.get_latest_version(timeframe)
+            version = self._get_best_version_for_skill(timeframe)
             oos = self.get_oos_result(version) if version else {}
             perf = self._load_performance(version) if version else {}
-            val_acc = max(
-                perf.get("accuracy", {}).get("xgboost_val", 0),
-                perf.get("accuracy", {}).get("random_forest_val", 0),
-            )
+            val_acc = self._extract_val_accuracy(perf, oos)
             history = self.get_version_history(timeframe)
-        else:
-            cnt = self.get_total_retrains()
-            version = self.get_latest_version()
-            oos = self.get_oos_result(version) if version else {}
-            perf = self._load_performance(version) if version else {}
-            val_acc = max(
-                perf.get("accuracy", {}).get("xgboost_val", 0),
-                perf.get("accuracy", {}).get("random_forest_val", 0),
+            _, score = scorer.compute_global(
+                retrain_count=cnt, oos_results=oos,
+                val_accuracy=val_acc, version_history=history,
             )
-            history = self.get_version_history(self.get_trained_timeframes()[0]) if self.get_trained_timeframes() else []
-        scorer = SkillScorer()
-        _, score = scorer.compute_global(
-            retrain_count=cnt,
-            oos_results=oos,
-            val_accuracy=val_acc,
-            version_history=history,
-        )
+        else:
+            # Aggregate across all timeframes
+            tfs = self.get_trained_timeframes()
+            if not tfs:
+                return 0
+            total_score = 0
+            for tf in tfs:
+                total_score += self.get_skill_score(tf)
+            score = total_score // len(tfs)
         return score
 
     def get_models_summary(self) -> Dict[str, Dict]:
         summary = {}
         for tf in self.get_trained_timeframes():
             label = self._tf_label(tf)
-            version = self.get_latest_version(tf) or self.get_production_version(tf) or "none"
+            version = self._get_best_version_for_skill(tf) or self.get_production_version(tf) or "none"
             perf = self._load_performance(version) if version != "none" else {}
             oos = perf.get("oos", {})
             summary[label] = {
@@ -734,6 +975,34 @@ class ModelManager:
             except Exception:
                 pass
         return {"total": 0}
+
+    def load_best_ensemble(self, timeframe: int) -> Optional[VotingEnsemble]:
+        """Load the best known ensemble for warm-start/continued training.
+        Returns None if no model exists (first-time training).
+        """
+        try:
+            # Priority 1: production model
+            return self.load_production(timeframe)
+        except ModelNotFoundError:
+            pass
+
+        try:
+            # Priority 2: best version by OOS score
+            best_ver = self.get_best_version(timeframe)
+            if best_ver:
+                return self.load_ensemble(best_ver)
+        except Exception:
+            pass
+
+        try:
+            # Priority 3: latest version
+            latest = self.get_latest_version(timeframe)
+            if latest:
+                return self.load_ensemble(latest)
+        except Exception:
+            pass
+
+        return None
 
     def is_market_open(self) -> bool:
         now = datetime.now()

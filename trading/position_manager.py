@@ -42,6 +42,10 @@ class PositionManager:
         reversal_force_close: bool = False,
         atr: float = 0,
         balance: float = 0,
+        multi_tf_trends: Dict = None,
+        momentum_result: Dict = None,
+        vol_result: Dict = None,
+        rsi: float = 0,
     ) -> List[Dict]:
         actions_taken = []
         positions = self.get_open_positions(symbol)
@@ -68,7 +72,7 @@ class PositionManager:
                 current_sl = position.get("sl")
                 pip_size = 0.0001
                 spread = self.data_engine.get_current_spread(symbol) or 10
-                be_buffer = spread * pip_size * 0.5  # half spread as buffer
+                be_buffer = spread * pip_size * 0.5
                 be_price = entry + be_buffer if is_buy else entry - be_buffer
 
                 if price_move >= atr:
@@ -86,14 +90,14 @@ class PositionManager:
                         new_sl = current_price - trail_dist
                         if new_sl > (current_sl or 0):
                             self.execution_engine.modify_position(position["ticket"], sl=new_sl)
-                            self.logger.info(f"Runner trail: ticket {position['ticket']} SL → {new_sl:.5f}")
+                            self.logger.info(f"Runner trail: ticket {position['ticket']} SL -> {new_sl:.5f}")
                     else:
                         new_sl = current_price + trail_dist
                         if new_sl < (current_sl or float("inf")):
                             self.execution_engine.modify_position(position["ticket"], sl=new_sl)
-                            self.logger.info(f"Runner trail: ticket {position['ticket']} SL → {new_sl:.5f}")
+                            self.logger.info(f"Runner trail: ticket {position['ticket']} SL -> {new_sl:.5f}")
 
-            action = self.exit_engine.evaluate_exit(
+            exit_result = self.exit_engine.evaluate_exit(
                 position=position,
                 current_price=current_price,
                 trend_result=trend_result,
@@ -101,13 +105,27 @@ class PositionManager:
                 confidence=confidence,
                 market_structure=market_structure,
                 atr=atr,
+                multi_tf_trends=multi_tf_trends,
+                momentum_result=momentum_result,
+                vol_result=vol_result,
+                rsi=rsi,
             )
+
+            if isinstance(exit_result, dict):
+                action = exit_result["action"]
+                reasons = exit_result.get("reasons", [])
+                for r in reasons:
+                    self.logger.info(f"  ticket {position['ticket']}: {r}")
+            else:
+                action = exit_result
+                reasons = []
 
             result = self._execute_action(position, action, current_price, atr)
             actions_taken.append({
                 "ticket": position["ticket"],
                 "action": action.value,
                 "result": result,
+                "reasons": reasons,
             })
 
         self.refresh_positions(symbol)

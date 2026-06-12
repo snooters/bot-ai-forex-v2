@@ -32,14 +32,31 @@ class ParquetStorage:
         pair_dir.mkdir(exist_ok=True)
         return pair_dir / f"tf_{timeframe}.{ext}"
 
+    def _validate_timestamps(self, df: pd.DataFrame, timeframe: int) -> pd.DataFrame:
+        if "time" not in df.columns or df.empty:
+            return df
+        t = pd.to_datetime(df["time"])
+        bad = (t.dt.microsecond != 0) | (t.dt.second != 0) | (t.dt.minute % max(timeframe, 1) != 0)
+        n_bad = bad.sum()
+        if n_bad > 0:
+            self.logger.warning(f"Removing {n_bad} rows with invalid timestamps (tf={timeframe})")
+            df = df[~bad].copy()
+        return df
+
     def save_data(self, symbol: str, timeframe: int, df: pd.DataFrame):
         if df.empty:
             return
         df = df.copy()
         if "time" in df.columns:
             df["time"] = pd.to_datetime(df["time"])
+            if hasattr(df["time"].dt, "tz") and df["time"].dt.tz is not None:
+                df["time"] = df["time"].dt.tz_localize(None)
             df.sort_values("time", inplace=True)
             df.drop_duplicates(subset=["time"], keep="last", inplace=True)
+        df = self._validate_timestamps(df, timeframe)
+        if df.empty:
+            self.logger.warning(f"No valid data to save for {symbol} tf={timeframe}")
+            return
 
         if self._parquet_available:
             filepath = self._get_path(symbol, timeframe, "parquet")
@@ -74,6 +91,8 @@ class ParquetStorage:
             return df
         if "time" in df.columns:
             df["time"] = pd.to_datetime(df["time"])
+            if hasattr(df["time"].dt, "tz") and df["time"].dt.tz is not None:
+                df["time"] = df["time"].dt.tz_localize(None)
             if from_date:
                 df = df[df["time"] >= from_date]
             if to_date:
@@ -91,6 +110,8 @@ class ParquetStorage:
         combined = pd.concat([existing, new_df], ignore_index=True)
         if "time" in combined.columns:
             combined["time"] = pd.to_datetime(combined["time"])
+            if hasattr(combined["time"].dt, "tz") and combined["time"].dt.tz is not None:
+                combined["time"] = combined["time"].dt.tz_localize(None)
             combined.sort_values("time", inplace=True)
             combined.drop_duplicates(subset=["time"], keep="last", inplace=True)
         self.save_data(symbol, timeframe, combined)
@@ -129,8 +150,8 @@ class ParquetStorage:
                             "from": str(df["time"].min()) if "time" in df.columns else "",
                             "to": str(df["time"].max()) if "time" in df.columns else "",
                         }
-                    except Exception:
-                        pass
+                    except Exception as stats_e:
+                        self.logger.debug(f"Failed to read storage stats for {symbol} {tf}: {stats_e}")
         return stats
 
     def delete_old_data(self, symbol: str, timeframe: int, before: datetime):
