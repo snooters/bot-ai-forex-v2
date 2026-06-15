@@ -652,10 +652,10 @@ body { display: flex; flex-direction: column; }
     $('card-equity').className = 'value';
     $('card-free').textContent = fmtDollar(s.free_margin);
     $('card-free').className = 'value';
-    const ml = s.margin_level || 0;
+    const marginLvl = s.margin_level || 0;
     const mlEl = $('card-margin-level');
-    mlEl.textContent = ml > 0 ? `${Number(ml).toFixed(0)}%` : '0%';
-    mlEl.className = 'value ' + (ml > 1000 ? 'value-green' : ml > 500 ? 'value-gold' : 'value-red');
+    mlEl.textContent = marginLvl > 0 ? `${Number(marginLvl).toFixed(0)}%` : '0%';
+    mlEl.className = 'value ' + (marginLvl > 1000 ? 'value-green' : marginLvl > 500 ? 'value-gold' : 'value-red');
     const fl2 = s.floating_profit || 0;
     const flEl2 = $('card-floating');
     flEl2.textContent = fmtDollar(fl2);
