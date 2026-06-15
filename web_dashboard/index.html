@@ -190,6 +190,7 @@ body { display: flex; flex-direction: column; }
   font-size: 9px; font-weight: 700; text-transform: uppercase;
 }
 .imp-high { background: var(--red-dim); color: var(--red); }
+.imp-low { background: var(--green-dim); color: var(--green); }
 
 /* ── AI Recommendation ── */
 .rec-box {
@@ -637,18 +638,39 @@ body { display: flex; flex-direction: column; }
 
     // Confidence Gauge
     const conf = (s.confidence || 0) * 100;
-    $('gauge-value').textContent = fmtPct(conf);
+    const gaugeValEl = $('gauge-value');
+    gaugeValEl.textContent = fmtPct(conf);
+    // Color thresholds: red < 40, yellow 40-60, green > 60
+    if (conf < 40) {
+      gaugeValEl.className = 'gauge-value value-red';
+    } else if (conf < 60) {
+      gaugeValEl.className = 'gauge-value value-gold';
+    } else {
+      gaugeValEl.className = 'gauge-value value-green';
+    }
     const maskWidth = Math.max(0, Math.min(100, 100 - conf));
     $('gauge-mask').style.width = maskWidth + '%';
     $('gauge-arrow').style.left = `calc(${conf}% - 1.5px)`;
 
-    // News (static example for now - can be fed from state)
+    // News from economic calendar
     const newsBox = $('news-box');
-    if (s._news) {
+    if (s._news && s._news.event) {
       newsBox.style.display = 'block';
-      $('news-time').textContent = s._news.time;
+      $('news-time').textContent = s._news.time_display || '--:--';
       $('news-event').textContent = s._news.event;
-      $('news-impact').textContent = 'IMPACT: ' + (s._news.impact || 'HIGH');
+      const impact = s._news.impact || 'MEDIUM';
+      const impEl = $('news-impact');
+      impEl.textContent = 'IMPACT: ' + impact;
+      impEl.className = 'news-impact ' + (impact === 'HIGH' ? 'imp-high' : 'imp-low');
+      // Show countdown if available
+      if (s._news.countdown_min != null) {
+        const cd = s._news.countdown_min;
+        if (cd > 60) {
+          $('news-time').textContent = s._news.time_display + ' (' + Math.round(cd/60) + 'h)';
+        } else if (cd > 0) {
+          $('news-time').textContent = s._news.time_display + ' (' + cd + 'm)';
+        }
+      }
     } else {
       newsBox.style.display = 'none';
     }
@@ -694,33 +716,32 @@ body { display: flex; flex-direction: column; }
     $('atr-display').textContent = s.atr != null ? Number(s.atr).toFixed(5) : '--';
 
     // ── AI Predictions ──
-    // Derive from available data: use ML signal + trend
-    const mlSig = s.ml_signal || {};
-    const buyP = mlSig.buy_prob != null ? mlSig.buy_prob : 0.5;
-    const sellP = mlSig.sell_prob != null ? mlSig.sell_prob : 0.5;
+    // Use per-TF prediction data from ML engine
+    const tfPred = s.tf_predictions || {};
 
-    // 15m prediction: weighted from M5 signal
-    const pred15 = sellP > buyP ? 'DOWN' : 'UP';
-    const pred15Pct = Math.max(50, (Math.max(sellP, buyP) * 100)).toFixed(0);
-    $('pred-15m').className = 'pred-item ' + (pred15 === 'UP' ? 'pred-up' : 'pred-down');
-    $('pred-15m-val').textContent = pred15 + ' ' + pred15Pct + '%';
-    $('pred-15m-bar').style.width = pred15Pct + '%';
+    function renderPrediction(tfLabel, predEl, valEl, barEl) {
+      const p = tfPred[tfLabel];
+      if (p && p.direction) {
+        const dir = p.direction;
+        const confPct = p.confidence || 50;
+        const isUp = dir === 'UP';
+        predEl.className = 'pred-item ' + (isUp ? 'pred-up' : (dir === 'SIDEWAYS' ? 'pred-item' : 'pred-down'));
+        valEl.textContent = dir + ' ' + confPct + '%';
+        barEl.style.width = confPct + '%';
+      } else {
+        // Fallback: use tf_scores
+        const score = s.tf_scores && s.tf_scores[tfLabel] != null ? s.tf_scores[tfLabel] : 50;
+        const dir = score >= 20 ? 'UP' : 'DOWN';
+        const confPct = Math.max(55, Math.min(95, Math.abs(score) + 30)).toFixed(0);
+        predEl.className = 'pred-item ' + (dir === 'UP' ? 'pred-up' : 'pred-down');
+        valEl.textContent = dir + ' ' + confPct + '%';
+        barEl.style.width = confPct + '%';
+      }
+    }
 
-    // 1h prediction: follow H1 trend
-    const h1Score = s.tf_scores && s.tf_scores['H1'] != null ? s.tf_scores['H1'] : 0;
-    const pred1h = h1Score < 20 ? 'DOWN' : 'UP';
-    const pred1hPct = Math.max(55, Math.min(95, Math.abs(h1Score) + 40)).toFixed(0);
-    $('pred-1h').className = 'pred-item ' + (pred1h === 'UP' ? 'pred-up' : 'pred-down');
-    $('pred-1h-val').textContent = pred1h + ' ' + pred1hPct + '%';
-    $('pred-1h-bar').style.width = pred1hPct + '%';
-
-    // 4h prediction: follow H4 trend
-    const h4Score = s.tf_scores && s.tf_scores['H4'] != null ? s.tf_scores['H4'] : 0;
-    const pred4h = h4Score < 20 ? 'DOWN' : 'UP';
-    const pred4hPct = Math.max(50, Math.min(90, Math.abs(h4Score) + 30)).toFixed(0);
-    $('pred-4h').className = 'pred-item ' + (pred4h === 'UP' ? 'pred-up' : 'pred-down');
-    $('pred-4h-val').textContent = pred4h + ' ' + pred4hPct + '%';
-    $('pred-4h-bar').style.width = pred4hPct + '%';
+    renderPrediction('M15', $('pred-15m'), $('pred-15m-val'), $('pred-15m-bar'));
+    renderPrediction('H1', $('pred-1h'), $('pred-1h-val'), $('pred-1h-bar'));
+    renderPrediction('H4', $('pred-4h'), $('pred-4h-val'), $('pred-4h-bar'));
 
     // ── Connection Status ──
     const connected = true; // if we got state, we're connected

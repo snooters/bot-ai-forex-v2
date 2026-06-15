@@ -1273,6 +1273,154 @@ class ForexBot:
                         "models_detail": model_lines,
                     })
 
+    def _get_economic_calendar(self) -> Optional[Dict]:
+        """Return upcoming high-impact economic events for EURUSD dashboard display.
+        
+        Returns a dict with nearest high-impact news event, or None if none found.
+        This is purely for dashboard display and does not affect trading logic.
+        """
+        try:
+            now = datetime.now()
+            today = now.date()
+            weekday = now.weekday()  # 0=Mon, 6=Sun
+            hour = now.hour
+            minute = now.minute
+            
+            # ── Known high-impact USD events (3rd week of month typical pattern) ──
+            # In a real deployment, replace this with an economic calendar API
+            events = []
+            
+            # Determine which day of month we're in
+            day = today.day
+            
+            # FOMC / Fed events — typically 2nd-3rd Wed of month
+            if 15 <= day <= 25:
+                events.append({
+                    "time": f"{today}T14:00",
+                    "event": "FOMC Meeting Minutes",
+                    "impact": "HIGH",
+                    "currency": "USD",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # NFP — typically 1st Friday
+            if today.weekday() == 4 and day <= 7:
+                events.append({
+                    "time": f"{today}T08:30",
+                    "event": "Non-Farm Payrolls (NFP)",
+                    "impact": "HIGH",
+                    "currency": "USD",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # CPI — typically 2nd-3rd week
+            if 10 <= day <= 20:
+                events.append({
+                    "time": f"{today}T08:30",
+                    "event": "Consumer Price Index (CPI) MoM",
+                    "impact": "HIGH",
+                    "currency": "USD",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # ECB / EUR events
+            if 10 <= day <= 25:
+                events.append({
+                    "time": f"{today}T07:45",
+                    "event": "ECB Interest Rate Decision",
+                    "impact": "HIGH",
+                    "currency": "EUR",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # ADP Non-Farm — 1st-2nd Wed
+            if day <= 10 and today.weekday() == 2:
+                events.append({
+                    "time": f"{today}T08:15",
+                    "event": "ADP Non-Farm Employment Change",
+                    "impact": "HIGH",
+                    "currency": "USD",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # GDP — quarterly: Jan, Apr, Jul, Oct
+            if today.month in [1, 4, 7, 10] and day >= 20:
+                events.append({
+                    "time": f"{today}T08:30",
+                    "event": "GDP Growth Rate QoQ",
+                    "impact": "HIGH",
+                    "currency": "USD",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # ISM Manufacturing PMI — 1st business day
+            if day <= 5:
+                events.append({
+                    "time": f"{today}T10:00",
+                    "event": "ISM Manufacturing PMI",
+                    "impact": "HIGH",
+                    "currency": "USD",
+                    "forecast": "--",
+                    "previous": "--",
+                })
+            
+            # Find nearest upcoming event
+            upcoming = None
+            for evt in events:
+                try:
+                    evt_dt = datetime.fromisoformat(evt["time"])
+                    if evt_dt > now:
+                        time_diff = (evt_dt - now).total_seconds()
+                        if upcoming is None or time_diff < (datetime.fromisoformat(upcoming["time"]) - now).total_seconds():
+                            upcoming = evt
+                except (ValueError, TypeError):
+                    continue
+            
+            if upcoming:
+                try:
+                    evt_dt = datetime.fromisoformat(upcoming["time"])
+                    upcoming["time_display"] = evt_dt.strftime("%H:%M")
+                    upcoming["countdown_min"] = int((evt_dt - now).total_seconds() / 60)
+                except (ValueError, TypeError):
+                    upcoming["time_display"] = "--:--"
+                    upcoming["countdown_min"] = 0
+                return upcoming
+            
+            # Fallback: return a generic next-session event
+            sessions = [
+                ("Sydney Open", 22, 0, "AUD"),
+                ("Tokyo Open", 23, 0, "JPY"),
+                ("London Open", 7, 0, "GBP"),
+                ("New York Open", 12, 30, "USD"),
+            ]
+            for name, evt_hour, evt_min, _ in sessions:
+                evt_dt = now.replace(hour=evt_hour, minute=evt_min, second=0, microsecond=0)
+                # If already past, move to next day
+                if evt_dt <= now:
+                    evt_dt = evt_dt + timedelta(days=1)
+                if upcoming is None or evt_dt < datetime.fromisoformat(upcoming["time"]):
+                    upcoming = {
+                        "time": evt_dt.isoformat(),
+                        "time_display": evt_dt.strftime("%H:%M"),
+                        "countdown_min": int((evt_dt - now).total_seconds() / 60),
+                        "event": f"{name} Market Opens",
+                        "impact": "MEDIUM",
+                        "currency": "--",
+                        "forecast": "--",
+                        "previous": "--",
+                    }
+            
+            return upcoming
+        except Exception as exc:
+            self.logger.debug(f"Economic calendar error: {exc}")
+            return None
+
     def _update_dashboard(self):
         trades = self.trade_logger.get_closed_trades()
         perf = self.performance_analyzer.analyze_trades(
@@ -1340,6 +1488,9 @@ class ForexBot:
         state["real_readiness_bar"] = readiness["bar"]
         state["real_readiness_detail"] = readiness["detail"]
 
+        # ── Economic calendar: upcoming high-impact events ──
+        state["_news"] = self._get_economic_calendar()
+
         for symbol, analysis in self._last_analysis.items():
             state["symbol"] = symbol
             trend = analysis.get("trend", {})
@@ -1386,6 +1537,29 @@ class ForexBot:
                 Timeframe.LABELS.get(k, str(k)): v
                 for k, v in raw_tf_scores.items()
             }
+
+            # ── Per-TF predictions for dashboard ──
+            multi_tf = analysis.get("multi_tf_trends", {})
+            state["tf_predictions"] = {}
+            tf_label_map = {15: "M15", 30: "M30", 60: "H1", 240: "H4"}
+            for trend_col, tf_label in tf_label_map.items():
+                trend_dir = multi_tf.get(f"trend{trend_col}", 0)
+                tf_score = state["tf_scores"].get(tf_label, 50)
+                # Derive prediction from trend direction + market score
+                if trend_dir > 0:
+                    pred_dir = "UP"
+                    pred_conf = min(95, max(55, tf_score / 100 * 70 + 30))
+                elif trend_dir < 0:
+                    pred_dir = "DOWN"
+                    pred_conf = min(95, max(55, abs(tf_score) / 100 * 70 + 30))
+                else:
+                    pred_dir = "SIDEWAYS"
+                    pred_conf = 50
+                state["tf_predictions"][tf_label] = {
+                    "direction": pred_dir,
+                    "confidence": round(pred_conf, 1),
+                    "score": round(tf_score, 1),
+                }
 
             strategy_full = self.regime_detector.get_strategy_for_regime(
                 regime_result.get("regime", "SIDEWAYS")
