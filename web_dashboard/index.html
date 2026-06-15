@@ -53,11 +53,9 @@ html,body{
 }
 .analysis{grid-column:5/10;grid-row:2;}
 .account{grid-column:10/13;grid-row:2;}
-.mktstatus{grid-column:5/8;grid-row:3;}
 .risk{grid-column:8/10;grid-row:3;}
-.performance{grid-column:10/13;grid-row:3;}
-.position{grid-column:1/7;grid-row:4;}
-.insight{grid-column:7/13;grid-row:4;}
+.intel{grid-column:10/13;grid-row:3;}
+.position{grid-column:1/13;grid-row:4;}
 
 .logo{display:flex;align-items:center;gap:10px;flex-shrink:0;}
 .logo h1{font-size:20px;background:linear-gradient(135deg,#00bfff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
@@ -74,35 +72,21 @@ html,body{
     text-transform:uppercase;
     flex-shrink:0;
 }
-/* SIGNAL */
 .hold{
     font-size:120px;
     font-weight:900;
     text-align:center;
     line-height:1;
-    flex:1;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    letter-spacing:4px;
-    min-height:0;
+    flex:1;display:flex;
+    align-items:center;justify-content:center;
+    letter-spacing:4px;min-height:0;
 }
 .confidence{
     text-align:center;
     font-size:40px;
     font-weight:700;
-    letter-spacing:1px;
-    flex-shrink:0;
+    letter-spacing:1px;flex-shrink:0;
 }
-.sig-label{
-    text-align:center;
-    font-size:11px;
-    color:#4a5a7a;
-    letter-spacing:2px;
-    text-transform:uppercase;
-    flex-shrink:0;
-}
-/* Tables */
 .table{width:100%;border-collapse:collapse;font-size:12px;}
 .table tr{border-bottom:1px solid #0d1f3d;}
 .table td{padding:4px 0;}
@@ -111,23 +95,18 @@ html,body{
 .red{color:var(--red);}
 .yellow{color:var(--yellow);}
 .blue{color:var(--blue);}
-/* Progress */
 .progress{height:4px;background:#10213f;border-radius:20px;overflow:hidden;margin:3px 0;flex-shrink:0;}
 .progress div{height:100%;background:var(--green);border-radius:20px;transition:width .5s ease;}
-/* Flex */
 .flex-center{display:flex;align-items:center;justify-content:center;}
 .f1{flex:1;min-height:0;}
 .text-xs{font-size:11px;color:#94a3b8;}
 .border-t{border-top:1px solid #0d1f3d;}
-/* Insight */
-.insight-text{font-size:13px;color:#c8d0e0;line-height:1.5;padding:4px 0;}
-.insight-icon{font-size:18px;color:var(--blue);margin-right:8px;flex-shrink:0;}
-/* Status indicators */
 .st-label{color:#4a5a7a;font-size:11px;}
 .st-value{font-size:13px;font-weight:600;}
+.insight-text{font-size:12px;color:#94a3b8;line-height:1.6;font-style:italic;}
 
 @media(max-width:1200px){
-.signal,.analysis,.account,.mktstatus,.risk,.performance,.position,.insight{grid-column:1/13;grid-row:auto;}
+.signal,.analysis,.account,.risk,.intel,.position{grid-column:1/13;grid-row:auto;}
 .dashboard{grid-template-rows:auto;}
 }
 </style>
@@ -142,7 +121,7 @@ html,body{
         <i class="fa-solid fa-brain" style="font-size:22px;color:var(--blue);"></i>
         <div>
             <h1>QUANTX AI</h1>
-            <small style="color:#4a5a7a;font-size:8px;letter-spacing:2px;text-transform:uppercase;">AI Trading System</small>
+            <small style="color:#4a5a7a;font-size:8px;letter-spacing:2px;text-transform:uppercase;">Systematic Trading</small>
         </div>
         <span class="live">LIVE</span>
     </div>
@@ -153,7 +132,7 @@ html,body{
     <div class="stat"><small>TIME</small><div style="font-size:13px;font-weight:700;" id="h-time">--:--:--</div></div>
 </div>
 
-<!-- ═══ SIGNAL (tall, 2 rows) ═══ -->
+<!-- ═══ SIGNAL (tall) ═══ -->
 <div class="card signal">
     <div class="title">AI Signal</div>
     <div class="hold" id="sig-action">HOLD</div>
@@ -163,18 +142,17 @@ html,body{
 <!-- ═══ AI ANALYSIS ═══ -->
 <div class="card analysis">
     <div class="title">AI Analysis</div>
-    <div class="f1" style="display:flex;flex-direction:column;gap:6px;">
+    <div class="f1" style="display:flex;flex-direction:column;gap:3px;">
         <div>
-            <div class="st-label">Market Condition</div>
-            <div style="font-size:16px;font-weight:700;" id="ana-condition">--</div>
+            <div class="st-label">Market Regime</div>
+            <div style="font-size:16px;font-weight:700;" id="ana-regime">--</div>
         </div>
         <div>
-            <div class="st-label">Decision</div>
-            <div style="font-size:14px;font-weight:600;" id="ana-decision">--</div>
+            <div class="st-label">Execution Status</div>
+            <div style="font-size:14px;font-weight:600;" id="ana-status">--</div>
         </div>
-        <div>
-            <div class="st-label">Reason</div>
-            <div style="font-size:12px;color:#94a3b8;line-height:1.4;" id="ana-reason">--</div>
+        <div class="f1 flex-center" style="flex-direction:column;justify-content:center;padding:2px 0;">
+            <div class="insight-text" id="ana-insight">Initializing quantitative analysis...</div>
         </div>
     </div>
 </div>
@@ -189,25 +167,6 @@ html,body{
         <tr><td>Drawdown</td><td class="val" style="font-size:13px;" id="a-dd">0%</td></tr>
     </table>
     <div class="progress" style="margin-top:2px;"><div id="a-ml-bar" style="width:0%;"></div></div>
-</div>
-
-<!-- ═══ MARKET STATUS ═══ -->
-<div class="card mktstatus">
-    <div class="title">Market Status</div>
-    <div style="font-size:12px;display:flex;flex-direction:column;gap:5px;">
-        <div class="flex-center" style="justify-content:space-between;">
-            <span class="st-label">Regime</span>
-            <span class="st-value" id="mkt-regime">--</span>
-        </div>
-        <div class="flex-center" style="justify-content:space-between;">
-            <span class="st-label">Quality</span>
-            <span class="st-value" id="mkt-quality">--</span>
-        </div>
-        <div class="flex-center" style="justify-content:space-between;">
-            <span class="st-label">Liquidity</span>
-            <span class="st-value" id="mkt-liquidity">--</span>
-        </div>
-    </div>
 </div>
 
 <!-- ═══ RISK ═══ -->
@@ -227,22 +186,22 @@ html,body{
 </div>
 
 <!-- ═══ AI INTELLIGENCE ═══ -->
-<div class="card performance">
+<div class="card intel">
     <div class="title">AI Intelligence</div>
-    <div style="font-size:11px;display:flex;flex-direction:column;gap:5px;" class="f1" style="justify-content:center;">
+    <div style="font-size:11px;display:flex;flex-direction:column;gap:4px;" class="f1" style="justify-content:center;">
         <div>
             <div class="flex-center" style="justify-content:space-between;">
                 <span class="st-label">Market Quality</span>
                 <b class="st-value" id="ai-mq">0%</b>
             </div>
-            <div class="progress" style="height:4px;"><div id="ai-mq-bar" style="width:0%;"></div></div>
+            <div class="progress" style="height:3px;"><div id="ai-mq-bar" style="width:0%;"></div></div>
         </div>
         <div>
             <div class="flex-center" style="justify-content:space-between;">
                 <span class="st-label">Trend Strength</span>
                 <b class="st-value" id="ai-ts">0%</b>
             </div>
-            <div class="progress" style="height:4px;"><div id="ai-ts-bar" style="width:0%;"></div></div>
+            <div class="progress" style="height:3px;"><div id="ai-ts-bar" style="width:0%;"></div></div>
         </div>
         <div>
             <div class="flex-center" style="justify-content:space-between;">
@@ -261,19 +220,19 @@ html,body{
                 <span class="st-label">AI Readiness</span>
                 <b class="st-value" id="ai-ready">0%</b>
             </div>
-            <div class="progress" style="height:4px;"><div id="ai-ready-bar" style="width:0%;"></div></div>
+            <div class="progress" style="height:3px;"><div id="ai-ready-bar" style="width:0%;"></div></div>
         </div>
     </div>
 </div>
 
-<!-- ═══ POSITION ═══ -->
+<!-- ═══ POSITION (full width) ═══ -->
 <div class="card position">
     <div class="title">Position</div>
     <div class="f1 flex-center" id="pos-c" style="flex-direction:column;justify-content:center;">
         <div id="pos-e" class="flex-center" style="flex-direction:column;gap:2px;">
-            <i class="fa-solid fa-circle-dot" style="font-size:18px;color:#2a4a6a;"></i>
+            <i class="fa-solid fa-circle-dot" style="font-size:16px;color:#2a4a6a;"></i>
             <div style="color:#3d5a7a;font-size:13px;font-weight:600;">No Open Position</div>
-            <div style="color:#2a4a6a;font-size:11px;">Monitoring markets...</div>
+            <div style="color:#2a4a6a;font-size:11px;">System monitoring active.</div>
         </div>
         <div id="pos-a" style="display:none;width:100%;">
             <div class="flex-center" style="justify-content:space-between;">
@@ -296,15 +255,6 @@ html,body{
     </div>
 </div>
 
-<!-- ═══ AI INSIGHT ═══ -->
-<div class="card insight">
-    <div class="title">AI Insight</div>
-    <div class="f1 flex-center" style="gap:8px;padding:4px 0;">
-        <i class="fa-solid fa-lightbulb insight-icon"></i>
-        <div class="insight-text" id="insight-text">Initializing analysis...</div>
-    </div>
-</div>
-
 </div>
 
 <script>
@@ -314,23 +264,87 @@ const W=()=>new Date().toLocaleTimeString('en-US',{hour12:false});
 const FP=(v)=>(v==null||isNaN(v)?'0.00000':Number(v).toFixed(5));
 const FD=(v)=>{if(v==null||isNaN(v))return'$0';const n=Number(v);return n>=0?`$${n.toFixed(2)}`:n>=-999?`-$${Math.abs(n).toFixed(2)}`:`-$${Math.abs(n).toFixed(0)}`};
 
-function insight(s){
+// ── AI INSIGHT LIBRARY ──
+const I={
+  HOLD:[
+    "No statistically significant edge detected.",
+    "Current market conditions do not satisfy execution criteria.",
+    "Signal quality remains below institutional threshold.",
+    "Predictive confidence remains below deployment threshold.",
+    "Insufficient model consensus across analytical layers."
+  ],
+  SIDE:[
+    "Directional bias remains inconclusive.",
+    "Price action remains within a non-trending regime.",
+    "Market structure lacks directional commitment.",
+    "Current market state does not support high-conviction execution."
+  ],
+  WAIT:[
+    "Monitoring for higher probability opportunities.",
+    "Awaiting structural alignment across analytical models.",
+    "Observing market development for execution readiness.",
+    "Execution deferred pending additional confirmation."
+  ],
+  VOL:[
+    "Market volatility exceeds acceptable risk parameters.",
+    "Execution suspended due to abnormal volatility conditions.",
+    "Current volatility profile reduces signal reliability.",
+    "Risk conditions remain elevated."
+  ],
+  BUY:[
+    "Multiple analytical layers indicate favorable long exposure.",
+    "Market conditions support bullish execution.",
+    "Statistical edge detected for directional continuation.",
+    "Execution criteria satisfied across core decision models."
+  ],
+  SELL:[
+    "Multiple analytical layers indicate favorable short exposure.",
+    "Market conditions support bearish execution.",
+    "Statistical edge detected for downside continuation.",
+    "Execution criteria satisfied across core decision models."
+  ]
+};
+
+let _lastInsight=null;
+
+function pick(arr){
+  if(!arr||!arr.length)return'Analyzing market conditions.';
+  let idx;
+  if(arr.length===1){idx=0}else{
+    do{idx=Math.floor(Math.random()*arr.length)}while(arr[idx]===_lastInsight&&arr.length>1);
+  }
+  _lastInsight=arr[idx];
+  return arr[idx];
+}
+
+function getInsight(s){
   const a=(s.current_action||'HOLD').toUpperCase();
   const t=(s.trend||'').toUpperCase();
-  const c=(s.confidence||0);
   const r=(s.regime||'').toUpperCase();
+  const c=s.confidence||0;
   const nt=!!s.no_trade;
-  const op=(s.open_positions||0)>0;
-  if(nt) return 'Waiting for institutional confirmation.';
-  if(op&&a==='BUY') return 'Long position active. Monitoring risk levels and momentum.';
-  if(op&&a==='SELL') return 'Short position active. Managing exposure and trend alignment.';
-  if(a==='BUY') return 'Bullish setup detected. Monitoring for confirmation.';
-  if(a==='SELL') return 'Bearish pressure identified. Awaiting entry confirmation.';
-  if(c<0.40) return 'Probability not sufficient for entry.';
-  if(t==='SIDEWAYS'||r==='SIDEWAYS') return 'Market lacks directional strength.';
-  if(t==='BULLISH') return 'Uptrend detected. Evaluating risk-adjusted opportunity.';
-  if(t==='BEARISH') return 'Downtrend confirmed. Monitoring for reversal signals.';
-  return 'Analyzing market structure and liquidity conditions.';
+  const isVol=r.includes('VOLATILE')||r.includes('HIGH');
+  const isSide=t==='SIDEWAYS'||r==='SIDEWAYS'||r==='CONSOLIDATION'||r==='SIDEWAYS';
+  if(a==='BUY'){return pick(I.BUY)}
+  if(a==='SELL'){return pick(I.SELL)}
+  if(isVol){return pick(I.VOL)}
+  if(nt){return pick(I.WAIT)}
+  if(isSide){return pick(I.SIDE)}
+  if(c<0.40){return pick(I.HOLD)}
+  return pick(I.HOLD);
+}
+
+function executionStatus(s){
+  const a=(s.current_action||'HOLD').toUpperCase();
+  const r=(s.regime||'').toUpperCase();
+  const c=s.confidence||0;
+  const nt=!!s.no_trade;
+  if(r.includes('VOLATILE')||r.includes('HIGH')) return 'Suspended';
+  if(c<0.30) return 'Standby';
+  if(a==='BUY'||a==='SELL') return 'Ready';
+  if(nt) return 'Monitoring';
+  if(c<0.50) return 'Standby';
+  return 'Monitoring';
 }
 
 function marketCondition(s){
@@ -340,38 +354,6 @@ function marketCondition(s){
   if(t==='BEARISH') return 'Trending Bearish';
   if(r==='VOLATILE'||r==='HIGH_VOLATILITY') return 'Volatile';
   return 'Sideways';
-}
-
-function marketDecision(s){
-  const a=(s.current_action||'HOLD').toUpperCase();
-  if(a==='BUY') return 'Buy Opportunity';
-  if(a==='SELL') return 'Sell Opportunity';
-  return 'No Trade';
-}
-
-function marketReason(s){
-  const a=(s.current_action||'HOLD').toUpperCase();
-  const t=(s.trend||'').toUpperCase();
-  const c=(s.confidence||0);
-  const nt=!!s.no_trade;
-  if(nt) return 'Low probability setup. Awaiting better conditions.';
-  if(a==='HOLD'&&c<0.40) return 'Probability insufficient for entry.';
-  if(a==='HOLD'&&t==='SIDEWAYS') return 'Trend not confirmed. Waiting for breakout.';
-  if(a==='HOLD') return 'Waiting for confirmation.';
-  if(a==='BUY'&&t==='BULLISH') return 'Bullish momentum confirmed.';
-  if(a==='SELL'&&t==='BEARISH') return 'Bearish pressure validated.';
-  if(a==='BUY') return 'Entry signals aligned.';
-  if(a==='SELL') return 'Sell signals confirmed.';
-  return 'Analyzing market conditions.';
-}
-
-function marketQuality(s){
-  const c=(s.confidence||0);
-  const t=(s.trend||'');
-  if(c>0.65) return 'Excellent';
-  if(c>0.50) return 'Good';
-  if(c>0.35||t) return 'Average';
-  return 'Poor';
 }
 
 function marketLiquidity(s){
@@ -388,9 +370,11 @@ function exposure(s){
   return 'LOW';
 }
 
+// ── RENDER ──
 function R(s){
   if(!s||!Object.keys(s).length)return;
   const p=s.current_price||0;
+
   // HEADER
   $('h-pair').textContent=s.symbol||'--';
   const pe=$('h-price');pe.textContent=FP(p);
@@ -407,12 +391,14 @@ function R(s){
   $('sig-conf').textContent=Math.round(cc)+'%';
   $('sig-conf').style.color=cc<40?'var(--red)':cc<60?'var(--yellow)':'var(--green)';
 
-  // ANALYSIS
-  $('ana-condition').textContent=marketCondition(s);
-  $('ana-condition').style.color=marketCondition(s).includes('Bullish')?'var(--green)':marketCondition(s).includes('Bearish')?'var(--red)':'var(--yellow)';
-  $('ana-decision').textContent=marketDecision(s);
-  $('ana-decision').style.color=marketDecision(s)==='Buy Opportunity'?'var(--green)':marketDecision(s)==='Sell Opportunity'?'var(--red)':'#94a3b8';
-  $('ana-reason').textContent=marketReason(s);
+  // AI ANALYSIS
+  const mc=marketCondition(s);
+  $('ana-regime').textContent=mc;
+  $('ana-regime').style.color=mc.includes('Bullish')?'var(--green)':mc.includes('Bearish')?'var(--red)':mc==='Volatile'?'var(--yellow)':'var(--yellow)';
+  const es=executionStatus(s);
+  $('ana-status').textContent=es;
+  $('ana-status').style.color=es==='Ready'?'var(--green)':es==='Monitoring'?'var(--blue)':es==='Standby'?'var(--yellow)':'var(--red)';
+  $('ana-insight').textContent=getInsight(s);
 
   // ACCOUNT
   $('a-bal').textContent=FD(s.balance);
@@ -424,17 +410,7 @@ function R(s){
   const ml=s.margin_level||0;
   $('a-ml-bar').style.width=Math.min(100,ml/20)+'%';$('a-ml-bar').style.background=ml>1000?'var(--green)':ml>500?'var(--yellow)':'var(--red)';
 
-  // MARKET STATUS
-  $('mkt-regime').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
-  $('mkt-regime').style.color=s.regime&&(s.regime.toUpperCase().includes('BULL')||s.regime.toUpperCase().includes('TREND'))?'var(--green)':s.regime&&s.regime.toUpperCase().includes('BEAR')?'var(--red)':'var(--yellow)';
-  const mq=marketQuality(s);
-  $('mkt-quality').textContent=mq;
-  $('mkt-quality').style.color=mq==='Excellent'?'var(--green)':mq==='Good'?'var(--blue)':mq==='Average'?'var(--yellow)':'var(--red)';
-  const mlq=marketLiquidity(s);
-  $('mkt-liquidity').textContent=mlq;
-  $('mkt-liquidity').style.color=mlq==='High'?'var(--green)':mlq==='Medium'?'var(--yellow)':'var(--red)';
-
-  // RISK (public)
+  // RISK
   const rsk=Math.min(100,Math.max(0,(1-(s.confidence||0))*100));
   const rl=rsk<=33?'LOW':rsk<=66?'MEDIUM':'HIGH';
   $('risk-lv').textContent=rl;
@@ -476,9 +452,6 @@ function R(s){
     $('pos-bar').style.width=pp+'%';$('pos-bar').style.background=pr>=0?'var(--green)':'var(--red)';
     $('pos-dur').textContent=po.duration||'--';$('pos-dist').textContent=po.distance||'--';
   } else {$('pos-a').style.display='none';$('pos-e').style.display='flex';}
-
-  // AI INSIGHT
-  $('insight-text').textContent=insight(s);
 }
 
 async function FS(){try{const r=await fetch('/api/state');const d=await r.json();if(d&&Object.keys(d).length>0)R(d);}catch(e){}}
