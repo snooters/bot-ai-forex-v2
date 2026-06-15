@@ -66,6 +66,7 @@ from reports.report_engine import ReportEngine
 from dashboard.dashboard import Dashboard
 from dashboard.tiktok_dashboard import TikTokDashboard
 from monitor.health_server import update_state as health_update
+from monitor.health_server import update_full_state, update_candles
 from utils.logger import get_logger
 from utils.training_progress import TrainingProgress
 from utils import sounds as sound_utils
@@ -1426,7 +1427,51 @@ class ForexBot:
             for t in self.trade_logger.get_closed_trades()[-5:]
         ]
 
-        self.dashboard.update(state)
+        # ── Web dashboard: broadcast full state + cache candles ──
+        state["mode"] = config.account.get("trading_mode", "simulation")
+        open_positions = self.position_manager.get_open_positions()
+        state["open_positions_detail"] = [
+            {
+                "ticket": p.get("ticket", 0),
+                "type": p.get("type", ""),
+                "volume": p.get("volume", 0),
+                "price_open": p.get("price_open", 0),
+                "profit": p.get("profit", 0),
+                "sl": p.get("sl", 0),
+                "tp": p.get("tp", 0),
+                "symbol": p.get("symbol", ""),
+            }
+            for p in open_positions
+        ]
+        update_full_state(state)
+
+        # Cache M5 candles for chart (every 5th call to reduce MT5 load)
+        try:
+            if not hasattr(self, '_candle_cache_counter'):
+                self._candle_cache_counter = 0
+            self._candle_cache_counter += 1
+            if self._candle_cache_counter >= 5:
+                self._candle_cache_counter = 0
+                for sym in config.trading.get("pairs", ["EURUSD"]):
+                    m5_df = self.data_engine.get_rates(sym, 5, count=100, use_cache=False)
+                    if m5_df is not None and not m5_df.empty:
+                        candles_list = []
+                        for _, row in m5_df.iterrows():
+                            if "time" in m5_df.columns:
+                                ts = int(row["time"].timestamp())
+                            else:
+                                continue
+                            candles_list.append({
+                                "time": ts,
+                                "open": float(row["open"]),
+                                "high": float(row["high"]),
+                                "low": float(row["low"]),
+                                "close": float(row["close"]),
+                            })
+                        if candles_list:
+                            update_candles(sym, candles_list)
+        except Exception as exc:
+            self.logger.debug(f"Web dashboard candle cache: {exc}")
 
         if self._tiktok_mode:
             closed_trades = self.trade_logger.get_closed_trades()
