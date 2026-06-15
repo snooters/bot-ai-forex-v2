@@ -57,3 +57,5 @@ telegram/
 # *.zip
 
 .opencode
+# Screenshot
+reference.png
