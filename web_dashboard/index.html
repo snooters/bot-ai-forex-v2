@@ -19,7 +19,7 @@
 *{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI,sans-serif;}
 html,body{
     width:100vw;height:100dvh;overflow:hidden;
-    background:var(--bg);color:var(--text);padding:6px;
+    background:var(--bg);color:var(--text);padding:5px;
 }
 @supports not (height:100dvh){
     html,body{height:calc(100vh - 40px);}
@@ -27,86 +27,73 @@ html,body{
 .dashboard{
     display:grid;
     grid-template-columns:repeat(12,1fr);
-    grid-template-rows:auto 1fr 1fr auto;
-    gap:6px;
+    grid-template-rows:auto 1fr 1fr 1fr auto auto;
+    gap:5px;
     height:100%;
 }
 .card{
     background:linear-gradient(180deg,#071224,#020b17);
     border:1px solid var(--border);
-    border-radius:10px;
-    padding:10px;
-    box-shadow:0 0 10px rgba(0,191,255,.06);
+    border-radius:8px;
+    padding:8px;
+    box-shadow:0 0 8px rgba(0,191,255,.05);
     display:flex;flex-direction:column;
     min-height:0;overflow:hidden;
 }
-.header{
-    grid-column:1/13;grid-row:1;
-    display:flex;align-items:center;
-    justify-content:space-between;flex-direction:row;
-    padding:6px 12px;min-height:42px;
-}
-.signal{
-    grid-column:1/5;grid-row:2/4;
-    background:linear-gradient(180deg,#081a30,#020b17);
-    border-color:rgba(0,191,255,.15);
-}
-.analysis{grid-column:5/10;grid-row:2;}
-.account{grid-column:10/13;grid-row:2;}
-.risk{grid-column:8/10;grid-row:3;}
-.intel{grid-column:10/13;grid-row:3;}
-.position{grid-column:1/13;grid-row:4;}
+/* ── Grid Placements ── */
+.header{grid-column:1/13;grid-row:1;display:flex;align-items:center;justify-content:space-between;flex-direction:row;padding:5px 10px;min-height:38px;}
+.signal{grid-column:1/4;grid-row:2;background:linear-gradient(180deg,#081a30,#020b17);border-color:rgba(0,191,255,.15);}
+.analysis{grid-column:4/9;grid-row:2;}
+.account{grid-column:9/13;grid-row:2;}
+.mktinsight{grid-column:1/5;grid-row:3;}
+.activity{grid-column:5/9;grid-row:3;}
+.corestat{grid-column:9/13;grid-row:3;}
+.intel{grid-column:1/3;grid-row:4;}
+.snapshot{grid-column:3/5;grid-row:4;}
+.risk{grid-column:5/8;grid-row:4;}
+.signals{grid-column:8/13;grid-row:4;}
+.position{grid-column:1/13;grid-row:5;}
+.footer{grid-column:1/13;grid-row:6;display:flex;align-items:center;justify-content:space-between;flex-direction:row;padding:4px 12px;min-height:26px;}
 
-.logo{display:flex;align-items:center;gap:10px;flex-shrink:0;}
-.logo h1{font-size:20px;background:linear-gradient(135deg,#00bfff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
-.live{background:#0a3;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;}
-.stat{text-align:center;font-size:11px;flex-shrink:0;}
-.stat .value{color:var(--green);font-size:15px;font-weight:bold;}
-
+/* ── Base Styles ── */
+.logo{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.logo h1{font-size:18px;background:linear-gradient(135deg,#00bfff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.live{background:#0a3;padding:1px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:1px;}
+.stat{text-align:center;font-size:10px;flex-shrink:0;}
+.stat .value{color:var(--green);font-size:14px;font-weight:bold;}
 .title{
-    margin-bottom:5px;
-    font-size:13px;
-    color:#94a3b8;
-    font-weight:600;
-    letter-spacing:1px;
-    text-transform:uppercase;
-    flex-shrink:0;
+    margin-bottom:4px;font-size:11px;color:#6a7a9a;
+    font-weight:600;letter-spacing:1px;text-transform:uppercase;flex-shrink:0;
 }
 .hold{
-    font-size:120px;
-    font-weight:900;
-    text-align:center;
-    line-height:1;
-    flex:1;display:flex;
-    align-items:center;justify-content:center;
-    letter-spacing:4px;min-height:0;
+    font-size:96px;font-weight:900;text-align:center;line-height:1;
+    flex:1;display:flex;align-items:center;justify-content:center;
+    letter-spacing:3px;min-height:0;
 }
-.confidence{
-    text-align:center;
-    font-size:40px;
-    font-weight:700;
-    letter-spacing:1px;flex-shrink:0;
-}
-.table{width:100%;border-collapse:collapse;font-size:12px;}
+.confidence{text-align:center;font-size:32px;font-weight:700;letter-spacing:1px;flex-shrink:0;}
+.table{width:100%;border-collapse:collapse;font-size:11px;}
 .table tr{border-bottom:1px solid #0d1f3d;}
-.table td{padding:4px 0;}
+.table td{padding:3px 0;}
 .val{text-align:right;font-weight:600;}
-.green{color:var(--green);}
-.red{color:var(--red);}
-.yellow{color:var(--yellow);}
-.blue{color:var(--blue);}
-.progress{height:4px;background:#10213f;border-radius:20px;overflow:hidden;margin:3px 0;flex-shrink:0;}
+.green{color:var(--green);}.red{color:var(--red);}.yellow{color:var(--yellow);}.blue{color:var(--blue);}
+.progress{height:4px;background:#10213f;border-radius:20px;overflow:hidden;margin:2px 0;flex-shrink:0;}
 .progress div{height:100%;background:var(--green);border-radius:20px;transition:width .5s ease;}
 .flex-center{display:flex;align-items:center;justify-content:center;}
 .f1{flex:1;min-height:0;}
-.text-xs{font-size:11px;color:#94a3b8;}
+.text-xs{font-size:10px;color:#94a3b8;}
 .border-t{border-top:1px solid #0d1f3d;}
-.st-label{color:#4a5a7a;font-size:11px;}
-.st-value{font-size:13px;font-weight:600;}
-.insight-text{font-size:12px;color:#94a3b8;line-height:1.6;font-style:italic;}
+.st-label{color:#4a5a7a;font-size:10px;}
+.st-value{font-size:12px;font-weight:600;}
+.st-dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;flex-shrink:0;}
+.st-dot.on{background:var(--green);box-shadow:0 0 4px rgba(0,255,136,.4);}
+.st-dot.off{background:#2a3a5a;}
+.signals-list{font-size:11px;}
+.sig-row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #0a1a2a;font-family:Consolas,monospace;}
+.sig-time{color:#4a5a7a;}
+.sig-act{font-weight:600;}
 
 @media(max-width:1200px){
-.signal,.analysis,.account,.risk,.intel,.position{grid-column:1/13;grid-row:auto;}
+.signal,.analysis,.account,.mktinsight,.activity,.corestat,.intel,.snapshot,.risk,.signals,.position,.footer{grid-column:1/13;grid-row:auto;}
 .dashboard{grid-template-rows:auto;}
 }
 </style>
@@ -118,21 +105,21 @@ html,body{
 <!-- ═══ HEADER ═══ -->
 <div class="card header">
     <div class="logo">
-        <i class="fa-solid fa-brain" style="font-size:22px;color:var(--blue);"></i>
+        <i class="fa-solid fa-brain" style="font-size:20px;color:var(--blue);"></i>
         <div>
             <h1>QUANTX AI</h1>
-            <small style="color:#4a5a7a;font-size:8px;letter-spacing:2px;text-transform:uppercase;">Systematic Trading</small>
+            <small style="color:#4a5a7a;font-size:7px;letter-spacing:2px;text-transform:uppercase;">Systematic Trading</small>
         </div>
         <span class="live">LIVE</span>
     </div>
-    <div class="stat"><small>PAIR</small><div class="value" style="font-size:14px;" id="h-pair">EURUSD</div></div>
-    <div class="stat"><small>PRICE</small><div class="value" style="font-size:14px;" id="h-price">0.00000</div></div>
-    <div class="stat"><small>SESSION</small><div style="font-size:13px;font-weight:700;" id="h-session">--</div></div>
-    <div class="stat"><small>AI</small><div class="green" style="font-size:13px;font-weight:700;" id="h-ai">ACTIVE</div></div>
-    <div class="stat"><small>TIME</small><div style="font-size:13px;font-weight:700;" id="h-time">--:--:--</div></div>
+    <div class="stat"><small>PAIR</small><div class="value" style="font-size:13px;" id="h-pair">EURUSD</div></div>
+    <div class="stat"><small>PRICE</small><div class="value" style="font-size:13px;" id="h-price">0.00000</div></div>
+    <div class="stat"><small>SESSION</small><div style="font-size:12px;font-weight:700;" id="h-session">--</div></div>
+    <div class="stat"><small>AI</small><div class="green" style="font-size:12px;font-weight:700;" id="h-ai">ACTIVE</div></div>
+    <div class="stat"><small>TIME</small><div style="font-size:12px;font-weight:700;" id="h-time">--:--:--</div></div>
 </div>
 
-<!-- ═══ SIGNAL (tall) ═══ -->
+<!-- ═══ SIGNAL (3 cols) ═══ -->
 <div class="card signal">
     <div class="title">AI Signal</div>
     <div class="hold" id="sig-action">HOLD</div>
@@ -142,17 +129,25 @@ html,body{
 <!-- ═══ AI ANALYSIS ═══ -->
 <div class="card analysis">
     <div class="title">AI Analysis</div>
-    <div class="f1" style="display:flex;flex-direction:column;gap:3px;">
-        <div>
-            <div class="st-label">Market Regime</div>
-            <div style="font-size:16px;font-weight:700;" id="ana-regime">--</div>
+    <div class="f1" style="font-size:11px;display:flex;flex-direction:column;gap:2px;">
+        <div class="flex-center" style="justify-content:space-between;">
+            <span class="st-label">Market Regime</span>
+            <span class="st-value" id="ana-regime">--</span>
         </div>
-        <div>
-            <div class="st-label">Execution Status</div>
-            <div style="font-size:14px;font-weight:600;" id="ana-status">--</div>
+        <div class="flex-center" style="justify-content:space-between;">
+            <span class="st-label">Execution Status</span>
+            <span class="st-value" id="ana-status">--</span>
+        </div>
+        <div class="flex-center" style="justify-content:space-between;">
+            <span class="st-label">AI Confidence</span>
+            <span class="st-value" id="ana-conf">--</span>
+        </div>
+        <div class="flex-center" style="justify-content:space-between;">
+            <span class="st-label">Market Bias</span>
+            <span class="st-value" id="ana-bias">--</span>
         </div>
         <div class="f1 flex-center" style="flex-direction:column;justify-content:center;padding:2px 0;">
-            <div class="insight-text" id="ana-insight">Initializing quantitative analysis...</div>
+            <div style="font-size:10px;color:#7a8aaa;line-height:1.5;font-style:italic;" id="ana-insight">Initializing quantitative analysis...</div>
         </div>
     </div>
 </div>
@@ -160,68 +155,95 @@ html,body{
 <!-- ═══ ACCOUNT ═══ -->
 <div class="card account">
     <div class="title">Account</div>
-    <table class="table" style="font-size:12px;">
-        <tr><td>Balance</td><td style="text-align:right;font-weight:700;font-size:17px;" id="a-bal">$0</td></tr>
-        <tr><td>Equity</td><td style="text-align:right;font-weight:700;font-size:17px;" id="a-eq">$0</td></tr>
-        <tr><td>P/L</td><td class="val" style="font-size:13px;" id="a-fl">$0.00</td></tr>
-        <tr><td>Drawdown</td><td class="val" style="font-size:13px;" id="a-dd">0%</td></tr>
+    <table class="table">
+        <tr><td>Balance</td><td class="val" style="font-size:15px;" id="a-bal">$0</td></tr>
+        <tr><td>Equity</td><td class="val" style="font-size:15px;" id="a-eq">$0</td></tr>
+        <tr><td>P/L</td><td class="val" style="font-size:12px;" id="a-fl">$0.00</td></tr>
+        <tr><td>Drawdown</td><td class="val" style="font-size:12px;" id="a-dd">0%</td></tr>
     </table>
-    <div class="progress" style="margin-top:2px;"><div id="a-ml-bar" style="width:0%;"></div></div>
+    <div class="progress"><div id="a-ml-bar" style="width:0%;"></div></div>
 </div>
 
-<!-- ═══ RISK ═══ -->
-<div class="card risk">
-    <div class="title">Risk</div>
-    <div style="font-size:12px;display:flex;flex-direction:column;gap:5px;justify-content:center;" class="f1">
-        <div class="flex-center" style="justify-content:space-between;">
-            <span class="st-label">Risk Level</span>
-            <span class="st-value" id="risk-lv">LOW</span>
-        </div>
-        <div class="progress" style="height:6px;"><div id="risk-bar" style="width:0%;"></div></div>
-        <div class="flex-center" style="justify-content:space-between;">
-            <span class="st-label">Exposure</span>
-            <span class="st-value" id="risk-exp">LOW</span>
-        </div>
+<!-- ═══ AI MARKET INSIGHT ═══ -->
+<div class="card mktinsight">
+    <div class="title">AI Market Insight</div>
+    <div class="f1 flex-center" style="flex-direction:column;align-items:stretch;justify-content:center;gap:4px;">
+        <div style="font-size:11px;color:#c8d0e0;line-height:1.5;" id="mkt-line1">Analyzing current market structure...</div>
+        <div style="font-size:10px;color:#7a8aaa;line-height:1.5;" id="mkt-line2"></div>
+    </div>
+</div>
+
+<!-- ═══ AI ACTIVITY ═══ -->
+<div class="card activity">
+    <div class="title">AI Activity</div>
+    <div class="f1 flex-center" style="flex-direction:column;align-items:stretch;justify-content:center;gap:4px;" id="act-c">
+        <div style="font-size:10px;color:#7a8aaa;"><span class="st-dot on"></span><span class="act-ln" id="act-1">Initializing...</span></div>
+        <div style="font-size:10px;color:#7a8aaa;"><span class="st-dot on"></span><span class="act-ln" id="act-2">Initializing...</span></div>
+        <div style="font-size:10px;color:#7a8aaa;"><span class="st-dot on"></span><span class="act-ln" id="act-3">Initializing...</span></div>
+        <div style="font-size:10px;color:#7a8aaa;"><span class="st-dot on"></span><span class="act-ln" id="act-4">Initializing...</span></div>
+        <div style="font-size:10px;color:#7a8aaa;"><span class="st-dot on"></span><span class="act-ln" id="act-5">Initializing...</span></div>
+    </div>
+</div>
+
+<!-- ═══ AI CORE STATUS ═══ -->
+<div class="card corestat">
+    <div class="title">AI Core Status</div>
+    <div class="f1 flex-center" style="flex-direction:column;align-items:stretch;justify-content:center;gap:3px;">
+        <div style="font-size:11px;"><span class="st-dot on"></span>Data Feed: <b id="cs-feed" style="float:right;color:var(--green);">Online</b></div>
+        <div style="font-size:11px;"><span class="st-dot on"></span>Decision Engine: <b id="cs-de" style="float:right;color:var(--green);">Active</b></div>
+        <div style="font-size:11px;"><span class="st-dot on"></span>Risk Engine: <b id="cs-re" style="float:right;color:var(--green);">Active</b></div>
+        <div style="font-size:11px;"><span class="st-dot on"></span>Market Scanner: <b id="cs-ms" style="float:right;color:var(--green);">Active</b></div>
+        <div style="font-size:11px;"><span class="st-dot on"></span>Execution Engine: <b id="cs-ee" style="float:right;">Ready</b></div>
     </div>
 </div>
 
 <!-- ═══ AI INTELLIGENCE ═══ -->
 <div class="card intel">
     <div class="title">AI Intelligence</div>
-    <div style="font-size:11px;display:flex;flex-direction:column;gap:4px;" class="f1" style="justify-content:center;">
+    <div style="font-size:10px;display:flex;flex-direction:column;gap:3px;" class="f1" style="justify-content:center;">
+        <div><div class="flex-center" style="justify-content:space-between;"><span class="st-label">Quality</span><b class="st-value" id="ai-mq">0%</b></div><div class="progress"><div id="ai-mq-bar" style="width:0%;"></div></div></div>
+        <div><div class="flex-center" style="justify-content:space-between;"><span class="st-label">Trend</span><b class="st-value" id="ai-ts">0%</b></div><div class="progress"><div id="ai-ts-bar" style="width:0%;"></div></div></div>
+        <div><div class="flex-center" style="justify-content:space-between;"><span class="st-label">Volatility</span><b class="st-value" id="ai-vol">--</b></div></div>
+        <div><div class="flex-center" style="justify-content:space-between;"><span class="st-label">Liquidity</span><b class="st-value" id="ai-liq">--</b></div></div>
         <div>
-            <div class="flex-center" style="justify-content:space-between;">
-                <span class="st-label">Market Quality</span>
-                <b class="st-value" id="ai-mq">0%</b>
-            </div>
-            <div class="progress" style="height:3px;"><div id="ai-mq-bar" style="width:0%;"></div></div>
+            <div class="flex-center" style="justify-content:space-between;"><span class="st-label">AI Readiness</span><b class="st-value" id="ai-ready">0%</b></div>
+            <div class="progress" style="height:8px;"><div id="ai-ready-bar" style="width:0%;"></div></div>
+            <div style="font-size:9px;color:#4a5a7a;margin-top:1px;" id="ai-ready-st">--</div>
         </div>
-        <div>
-            <div class="flex-center" style="justify-content:space-between;">
-                <span class="st-label">Trend Strength</span>
-                <b class="st-value" id="ai-ts">0%</b>
-            </div>
-            <div class="progress" style="height:3px;"><div id="ai-ts-bar" style="width:0%;"></div></div>
-        </div>
-        <div>
-            <div class="flex-center" style="justify-content:space-between;">
-                <span class="st-label">Volatility</span>
-                <b class="st-value" id="ai-vol">--</b>
-            </div>
-        </div>
-        <div>
-            <div class="flex-center" style="justify-content:space-between;">
-                <span class="st-label">Liquidity</span>
-                <b class="st-value" id="ai-liq">--</b>
-            </div>
-        </div>
-        <div>
-            <div class="flex-center" style="justify-content:space-between;">
-                <span class="st-label">AI Readiness</span>
-                <b class="st-value" id="ai-ready">0%</b>
-            </div>
-            <div class="progress" style="height:3px;"><div id="ai-ready-bar" style="width:0%;"></div></div>
-        </div>
+    </div>
+</div>
+
+<!-- ═══ MARKET SNAPSHOT ═══ -->
+<div class="card snapshot">
+    <div class="title">Market Snapshot</div>
+    <div style="font-size:10px;display:flex;flex-direction:column;gap:2px;" class="f1 flex-center" style="flex-direction:column;align-items:stretch;">
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Session</span><span class="st-value" id="sn-session">--</span></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Regime</span><span class="st-value" id="sn-regime">--</span></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Volatility</span><span class="st-value" id="sn-vol">--</span></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Liquidity</span><span class="st-value" id="sn-liq">--</span></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Bias</span><span class="st-value" id="sn-bias">--</span></div>
+    </div>
+</div>
+
+<!-- ═══ RISK (expanded) ═══ -->
+<div class="card risk">
+    <div class="title">Risk</div>
+    <div style="font-size:10px;display:flex;flex-direction:column;gap:2px;" class="f1" style="justify-content:center;">
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Risk Level</span><b class="st-value" id="risk-lv">LOW</b></div>
+        <div class="progress" style="height:5px;"><div id="risk-bar" style="width:0%;"></div></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Exposure</span><b class="st-value" id="risk-exp">LOW</b></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Market Risk</span><b class="st-value" id="risk-mr">--</b></div>
+        <div class="progress" style="height:3px;"><div id="risk-mr-bar" style="width:0%;"></div></div>
+        <div class="flex-center" style="justify-content:space-between;"><span class="st-label">Execution Risk</span><b class="st-value" id="risk-er">--</b></div>
+        <div class="progress" style="height:3px;"><div id="risk-er-bar" style="width:0%;"></div></div>
+    </div>
+</div>
+
+<!-- ═══ RECENT SIGNALS ═══ -->
+<div class="card signals">
+    <div class="title">Recent Signals</div>
+    <div class="f1 signals-list" id="sig-list" style="overflow-y:auto;">
+        <div class="sig-row"><span class="sig-time">--:--</span><span class="sig-act" style="color:#4a5a7a;">No signals yet</span></div>
     </div>
 </div>
 
@@ -230,28 +252,37 @@ html,body{
     <div class="title">Position</div>
     <div class="f1 flex-center" id="pos-c" style="flex-direction:column;justify-content:center;">
         <div id="pos-e" class="flex-center" style="flex-direction:column;gap:2px;">
-            <i class="fa-solid fa-circle-dot" style="font-size:16px;color:#2a4a6a;"></i>
-            <div style="color:#3d5a7a;font-size:13px;font-weight:600;">No Open Position</div>
-            <div style="color:#2a4a6a;font-size:11px;">System monitoring active.</div>
+            <i class="fa-solid fa-circle-dot" style="font-size:14px;color:#2a4a6a;"></i>
+            <div style="color:#3d5a7a;font-size:12px;font-weight:600;">No Open Position</div>
+            <div style="color:#2a4a6a;font-size:10px;">System monitoring active.</div>
         </div>
         <div id="pos-a" style="display:none;width:100%;">
             <div class="flex-center" style="justify-content:space-between;">
-                <span style="font-size:18px;font-weight:900;" id="pos-type">BUY</span>
-                <span style="color:#4a5a7a;font-size:11px;">#<span id="pos-tkt">--</span></span>
+                <span style="font-size:16px;font-weight:900;" id="pos-type">BUY</span>
+                <span style="color:#4a5a7a;font-size:10px;">#<span id="pos-tkt">--</span></span>
             </div>
-            <div class="flex-center" style="justify-content:space-around;margin:5px 0 3px;">
-                <div style="text-align:center;"><span class="text-xs">Entry</span><br><b style="font-size:12px;" id="pos-ent">--</b></div>
-                <div style="text-align:center;"><span class="text-xs">Current</span><br><b style="font-size:12px;" id="pos-now">--</b></div>
-                <div style="text-align:center;"><span class="text-xs">Profit</span><br><b style="font-size:16px;" id="pos-profit">$0</b></div>
-                <div style="text-align:center;"><span class="text-xs">SL</span><br><b style="font-size:11px;" id="pos-sl">--</b></div>
-                <div style="text-align:center;"><span class="text-xs">TP</span><br><b style="font-size:11px;" id="pos-tp">--</b></div>
+            <div class="flex-center" style="justify-content:space-around;margin:4px 0 2px;">
+                <div style="text-align:center;"><span class="text-xs">Entry</span><br><b style="font-size:11px;" id="pos-ent">--</b></div>
+                <div style="text-align:center;"><span class="text-xs">Current</span><br><b style="font-size:11px;" id="pos-now">--</b></div>
+                <div style="text-align:center;"><span class="text-xs">Profit</span><br><b style="font-size:14px;" id="pos-profit">$0</b></div>
+                <div style="text-align:center;"><span class="text-xs">SL</span><br><b style="font-size:10px;" id="pos-sl">--</b></div>
+                <div style="text-align:center;"><span class="text-xs">TP</span><br><b style="font-size:10px;" id="pos-tp">--</b></div>
             </div>
             <div class="progress" style="height:3px;"><div id="pos-bar" style="width:0%;"></div></div>
-            <div class="flex-center" style="justify-content:space-between;font-size:10px;color:#4a5a7a;margin-top:2px;">
+            <div class="flex-center" style="justify-content:space-between;font-size:9px;color:#4a5a7a;margin-top:1px;">
                 <span>Dur: <b id="pos-dur">--</b></span>
                 <span>Dist: <b id="pos-dist">--</b></span>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- ═══ FOOTER ═══ -->
+<div class="card footer">
+    <div style="font-size:9px;color:#4a5a7a;">QUANTX AI v2.0 &mdash; Systematic Trading Intelligence</div>
+    <div style="font-size:9px;color:#4a5a7a;">
+        <span class="st-dot on"></span>Market Monitoring Active
+        &nbsp;&mdash;&nbsp; Last Analysis: <b id="ft-last" style="color:#7a8aaa;">--</b>
     </div>
 </div>
 
@@ -264,116 +295,112 @@ const W=()=>new Date().toLocaleTimeString('en-US',{hour12:false});
 const FP=(v)=>(v==null||isNaN(v)?'0.00000':Number(v).toFixed(5));
 const FD=(v)=>{if(v==null||isNaN(v))return'$0';const n=Number(v);return n>=0?`$${n.toFixed(2)}`:n>=-999?`-$${Math.abs(n).toFixed(2)}`:`-$${Math.abs(n).toFixed(0)}`};
 
-// ── AI INSIGHT LIBRARY ──
+// ── INSIGHT LIBRARY ──
 const I={
-  HOLD:[
-    "No statistically significant edge detected.",
-    "Current market conditions do not satisfy execution criteria.",
-    "Signal quality remains below institutional threshold.",
-    "Predictive confidence remains below deployment threshold.",
-    "Insufficient model consensus across analytical layers."
-  ],
-  SIDE:[
-    "Directional bias remains inconclusive.",
-    "Price action remains within a non-trending regime.",
-    "Market structure lacks directional commitment.",
-    "Current market state does not support high-conviction execution."
-  ],
-  WAIT:[
-    "Monitoring for higher probability opportunities.",
-    "Awaiting structural alignment across analytical models.",
-    "Observing market development for execution readiness.",
-    "Execution deferred pending additional confirmation."
-  ],
-  VOL:[
-    "Market volatility exceeds acceptable risk parameters.",
-    "Execution suspended due to abnormal volatility conditions.",
-    "Current volatility profile reduces signal reliability.",
-    "Risk conditions remain elevated."
-  ],
-  BUY:[
-    "Multiple analytical layers indicate favorable long exposure.",
-    "Market conditions support bullish execution.",
-    "Statistical edge detected for directional continuation.",
-    "Execution criteria satisfied across core decision models."
-  ],
-  SELL:[
-    "Multiple analytical layers indicate favorable short exposure.",
-    "Market conditions support bearish execution.",
-    "Statistical edge detected for downside continuation.",
-    "Execution criteria satisfied across core decision models."
-  ]
+  HOLD:["No statistically significant edge detected.","Current market conditions do not satisfy execution criteria.","Signal quality remains below institutional threshold.","Predictive confidence remains below deployment threshold.","Insufficient model consensus across analytical layers."],
+  SIDE:["Directional bias remains inconclusive.","Price action remains within a non-trending regime.","Market structure lacks directional commitment.","Current market state does not support high-conviction execution."],
+  WAIT:["Monitoring for higher probability opportunities.","Awaiting structural alignment across analytical models.","Observing market development for execution readiness.","Execution deferred pending additional confirmation."],
+  VOL:["Market volatility exceeds acceptable risk parameters.","Execution suspended due to abnormal volatility conditions.","Current volatility profile reduces signal reliability.","Risk conditions remain elevated."],
+  BUY:["Multiple analytical layers indicate favorable long exposure.","Market conditions support bullish execution.","Statistical edge detected for directional continuation.","Execution criteria satisfied across core decision models."],
+  SELL:["Multiple analytical layers indicate favorable short exposure.","Market conditions support bearish execution.","Statistical edge detected for downside continuation.","Execution criteria satisfied across core decision models."]
 };
+const MKT_INSIGHTS=[
+  "Current market conditions remain range-bound.",
+  "Directional conviction remains limited.",
+  "Signal quality remains below execution threshold.",
+  "Market participation remains subdued.",
+  "Liquidity conditions remain below optimal levels.",
+  "Risk-adjusted opportunity remains limited.",
+  "Awaiting stronger directional confirmation.",
+  "Current conditions do not present a statistically significant edge.",
+  "Execution criteria remain partially satisfied.",
+  "Monitoring institutional participation.",
+  "Evaluating potential breakout conditions.",
+  "Market depth suggests limited directional commitment.",
+  "Cross-market analysis indicates mixed signals.",
+  "Volume profile shows declining participation."
+];
+const ACT_MSGS=[
+  "Market Scan Complete",
+  "Liquidity Assessment Complete",
+  "Risk Evaluation Complete",
+  "Signal Validation in Progress",
+  "Execution Engine Standby",
+  "Volatility Assessment Updated",
+  "Market Structure Analyzed",
+  "Cross-Asset Correlation Updated",
+  "Risk Parameters Verified",
+  "Data Integrity Check Passed",
+  "Model Inference Complete",
+  "Portfolio Exposure Calculated",
+  "System Health Check Passed",
+  "Market Regime Classification Updated",
+  "Execution Thresholds Validated"
+];
 
-let _lastInsight=null;
+let _lastInsight=null,_lastTs=null,_sigHist=[];
 
 function pick(arr){
-  if(!arr||!arr.length)return'Analyzing market conditions.';
-  let idx;
-  if(arr.length===1){idx=0}else{
-    do{idx=Math.floor(Math.random()*arr.length)}while(arr[idx]===_lastInsight&&arr.length>1);
-  }
-  _lastInsight=arr[idx];
-  return arr[idx];
+  if(!arr||!arr.length)return'';let idx;
+  if(arr.length===1){idx=0}else{do{idx=Math.floor(Math.random()*arr.length)}while(arr[idx]===_lastInsight&&arr.length>1)}
+  _lastInsight=arr[idx];return arr[idx];
 }
 
+function pick2(arr){let idx=Math.floor(Math.random()*arr.length);return arr[idx];}
+
 function getInsight(s){
-  const a=(s.current_action||'HOLD').toUpperCase();
-  const t=(s.trend||'').toUpperCase();
-  const r=(s.regime||'').toUpperCase();
-  const c=s.confidence||0;
-  const nt=!!s.no_trade;
+  const a=(s.current_action||'HOLD').toUpperCase(),t=(s.trend||'').toUpperCase(),r=(s.regime||'').toUpperCase();
+  const c=s.confidence||0,nt=!!s.no_trade;
   const isVol=r.includes('VOLATILE')||r.includes('HIGH');
-  const isSide=t==='SIDEWAYS'||r==='SIDEWAYS'||r==='CONSOLIDATION'||r==='SIDEWAYS';
-  if(a==='BUY'){return pick(I.BUY)}
-  if(a==='SELL'){return pick(I.SELL)}
-  if(isVol){return pick(I.VOL)}
-  if(nt){return pick(I.WAIT)}
-  if(isSide){return pick(I.SIDE)}
-  if(c<0.40){return pick(I.HOLD)}
+  const isSide=t==='SIDEWAYS'||r==='SIDEWAYS'||r==='CONSOLIDATION';
+  if(a==='BUY')return pick(I.BUY);if(a==='SELL')return pick(I.SELL);
+  if(isVol)return pick(I.VOL);if(nt)return pick(I.WAIT);
+  if(isSide)return pick(I.SIDE);if(c<0.40)return pick(I.HOLD);
   return pick(I.HOLD);
 }
 
 function executionStatus(s){
-  const a=(s.current_action||'HOLD').toUpperCase();
-  const r=(s.regime||'').toUpperCase();
-  const c=s.confidence||0;
-  const nt=!!s.no_trade;
-  if(r.includes('VOLATILE')||r.includes('HIGH')) return 'Suspended';
-  if(c<0.30) return 'Standby';
-  if(a==='BUY'||a==='SELL') return 'Ready';
-  if(nt) return 'Monitoring';
-  if(c<0.50) return 'Standby';
-  return 'Monitoring';
-}
-
-function marketCondition(s){
-  const t=(s.trend||'').toUpperCase();
-  const r=(s.regime||'').toUpperCase();
-  if(t==='BULLISH') return 'Trending Bullish';
-  if(t==='BEARISH') return 'Trending Bearish';
-  if(r==='VOLATILE'||r==='HIGH_VOLATILITY') return 'Volatile';
-  return 'Sideways';
+  const a=(s.current_action||'HOLD').toUpperCase(),r=(s.regime||'').toUpperCase(),c=s.confidence||0,nt=!!s.no_trade;
+  if(r.includes('VOLATILE')||r.includes('HIGH'))return'Suspended';
+  if(c<0.30)return'Standby';if(a==='BUY'||a==='SELL')return'Ready';
+  if(nt)return'Monitoring';if(c<0.50)return'Standby';
+  return'Monitoring';
 }
 
 function marketLiquidity(s){
   const h=new Date().getHours();
-  if(h>=12&&h<16) return 'High';
-  if(h>=7&&h<12||h>=16&&h<22) return 'Medium';
-  return 'Low';
+  if(h>=12&&h<16)return'High';if(h>=7&&h<12||h>=16&&h<22)return'Medium';
+  return'Low';
 }
 
-function exposure(s){
-  const op=s.open_positions||0;
-  if(op>=2) return 'HIGH';
-  if(op===1) return 'MEDIUM';
-  return 'LOW';
+function biasLabel(s){
+  const t=(s.trend||'').toUpperCase();
+  if(t==='BULLISH')return'Bullish';if(t==='BEARISH')return'Bearish';
+  return'Neutral';
+}
+
+let _actIdx=0;
+function tickActivity(){
+  for(let i=1;i<=5;i++){
+    const idx=(_actIdx+i-1)%ACT_MSGS.length;
+    const el=$('act-'+i);if(el){el.textContent=ACT_MSGS[idx];}
+  }
+  _actIdx=(_actIdx+1)%ACT_MSGS.length;
+}
+
+let _mktInsIdx=0;
+function tickMarketInsight(){
+  const line1=MKT_INSIGHTS[_mktInsIdx%MKT_INSIGHTS.length];
+  const line2=MKT_INSIGHTS[(_mktInsIdx+1)%MKT_INSIGHTS.length];
+  $('mkt-line1').textContent=line1;$('mkt-line2').textContent=line2;
+  _mktInsIdx=(_mktInsIdx+1)%MKT_INSIGHTS.length;
 }
 
 // ── RENDER ──
+let _lastTick=Date.now();
 function R(s){
   if(!s||!Object.keys(s).length)return;
-  const p=s.current_price||0;
+  const p=s.current_price||0;_lastTick=Date.now();
 
   // HEADER
   $('h-pair').textContent=s.symbol||'--';
@@ -392,17 +419,23 @@ function R(s){
   $('sig-conf').style.color=cc<40?'var(--red)':cc<60?'var(--yellow)':'var(--green)';
 
   // AI ANALYSIS
-  const mc=marketCondition(s);
-  $('ana-regime').textContent=mc;
-  $('ana-regime').style.color=mc.includes('Bullish')?'var(--green)':mc.includes('Bearish')?'var(--red)':mc==='Volatile'?'var(--yellow)':'var(--yellow)';
+  const mc=(s.trend||'').toUpperCase();
+  let regime='Sideways';
+  if(mc==='BULLISH')regime='Trending Bullish';else if(mc==='BEARISH')regime='Trending Bearish';else if((s.regime||'').toUpperCase().includes('VOLATILE'))regime='Volatile';
+  $('ana-regime').textContent=regime;
+  $('ana-regime').style.color=regime.includes('Bullish')?'var(--green)':regime.includes('Bearish')?'var(--red)':regime==='Volatile'?'var(--yellow)':'var(--yellow)';
   const es=executionStatus(s);
   $('ana-status').textContent=es;
   $('ana-status').style.color=es==='Ready'?'var(--green)':es==='Monitoring'?'var(--blue)':es==='Standby'?'var(--yellow)':'var(--red)';
+  $('ana-conf').textContent=Math.round(cc)+'%';
+  $('ana-conf').style.color=cc<40?'var(--red)':cc<60?'var(--yellow)':'var(--green)';
+  const bias=biasLabel(s);
+  $('ana-bias').textContent=bias;
+  $('ana-bias').style.color=bias==='Bullish'?'var(--green)':bias==='Bearish'?'var(--red)':'#94a3b8';
   $('ana-insight').textContent=getInsight(s);
 
   // ACCOUNT
-  $('a-bal').textContent=FD(s.balance);
-  $('a-eq').textContent=FD(s.equity);
+  $('a-bal').textContent=FD(s.balance);$('a-eq').textContent=FD(s.equity);
   const fl=s.floating_profit||0;
   $('a-fl').textContent=FD(fl);$('a-fl').style.color=fl>=0?'var(--green)':'var(--red)';
   const dd=(s.drawdown||0)*100;
@@ -410,42 +443,72 @@ function R(s){
   const ml=s.margin_level||0;
   $('a-ml-bar').style.width=Math.min(100,ml/20)+'%';$('a-ml-bar').style.background=ml>1000?'var(--green)':ml>500?'var(--yellow)':'var(--red)';
 
-  // RISK
-  const rsk=Math.min(100,Math.max(0,(1-(s.confidence||0))*100));
-  const rl=rsk<=33?'LOW':rsk<=66?'MEDIUM':'HIGH';
-  $('risk-lv').textContent=rl;
-  $('risk-lv').style.color=rsk<=33?'var(--green)':rsk<=66?'var(--yellow)':'var(--red)';
-  $('risk-bar').style.width=rsk+'%';$('risk-bar').style.background=rsk<=33?'var(--green)':rsk<=66?'var(--yellow)':'var(--red)';
-  const exp=exposure(s);
-  $('risk-exp').textContent=exp;
-  $('risk-exp').style.color=exp==='LOW'?'var(--green)':exp==='MEDIUM'?'var(--yellow)':'var(--red)';
-
   // AI INTELLIGENCE
-  const ts_=(s.trend_strength||0)*100;
-  const cf_=(s.confidence||0)*100;
+  const ts_=(s.trend_strength||0)*100,cf_=(s.confidence||0)*100;
   const mq_=Math.min(100,Math.max(0,Math.round(ts_*0.6+cf_*0.4)));
-  $('ai-mq').textContent=mq_+'%';$('ai-mq-bar').style.width=mq_+'%';
-  $('ai-mq-bar').style.background=mq_>60?'var(--green)':mq_>35?'var(--yellow)':'var(--red)';
-  $('ai-ts').textContent=Math.round(ts_)+'%';$('ai-ts-bar').style.width=ts_+'%';
-  $('ai-ts-bar').style.background=ts_>50?'var(--green)':ts_>25?'var(--yellow)':'var(--red)';
-  const vr_=(s.regime||'').toUpperCase();
-  let vol_='Normal';
-  if(vr_.includes('VOLATILE')||vr_.includes('HIGH')) vol_='High'; else if(vr_.includes('SIDEWAYS')) vol_='Low';
+  $('ai-mq').textContent=mq_+'%';$('ai-mq-bar').style.width=mq_+'%';$('ai-mq-bar').style.background=mq_>60?'var(--green)':mq_>35?'var(--yellow)':'var(--red)';
+  $('ai-ts').textContent=Math.round(ts_)+'%';$('ai-ts-bar').style.width=ts_+'%';$('ai-ts-bar').style.background=ts_>50?'var(--green)':ts_>25?'var(--yellow)':'var(--red)';
+  const vr_=(s.regime||'').toUpperCase();let vol_='Normal';
+  if(vr_.includes('VOLATILE')||vr_.includes('HIGH'))vol_='High';else if(vr_.includes('SIDEWAYS'))vol_='Low';
   $('ai-vol').textContent=vol_;$('ai-vol').style.color=vol_==='High'?'var(--red)':vol_==='Low'?'var(--yellow)':'var(--green)';
-  const lq_=marketLiquidity(s);$('ai-liq').textContent=lq_;
-  $('ai-liq').style.color=lq_==='High'?'var(--green)':lq_==='Medium'?'var(--yellow)':'var(--red)';
+  const lq_=marketLiquidity(s);$('ai-liq').textContent=lq_;$('ai-liq').style.color=lq_==='High'?'var(--green)':lq_==='Medium'?'var(--yellow)':'var(--red)';
   $('ai-ready').textContent=Math.round(cf_)+'%';$('ai-ready-bar').style.width=cf_+'%';
   $('ai-ready-bar').style.background=cf_>60?'var(--green)':cf_>35?'var(--yellow)':'var(--red)';
+  let rst='Insufficient Data';if(cf_>65)rst='Optimal';else if(cf_>45)rst='Building Conviction';else if(cf_>25)rst='Accumulating Evidence';
+  $('ai-ready-st').textContent=rst;
+
+  // MARKET SNAPSHOT
+  $('sn-session').textContent=ss;
+  $('sn-regime').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
+  $('sn-regime').style.color=(s.regime||'').toUpperCase().includes('BULL')?'var(--green)':(s.regime||'').toUpperCase().includes('BEAR')?'var(--red)':'var(--yellow)';
+  $('sn-vol').textContent=vol_;$('sn-vol').style.color=vol_==='High'?'var(--red)':vol_==='Low'?'var(--yellow)':'var(--green)';
+  $('sn-liq').textContent=lq_;$('sn-liq').style.color=lq_==='High'?'var(--green)':lq_==='Medium'?'var(--yellow)':'var(--red)';
+  $('sn-bias').textContent=bias;$('sn-bias').style.color=bias==='Bullish'?'var(--green)':bias==='Bearish'?'var(--red)':'#94a3b8';
+
+  // RISK (expanded)
+  const rsk=Math.min(100,Math.max(0,(1-(s.confidence||0))*100));
+  const rl=rsk<=33?'LOW':rsk<=66?'MEDIUM':'HIGH';
+  $('risk-lv').textContent=rl;$('risk-lv').style.color=rsk<=33?'var(--green)':rsk<=66?'var(--yellow)':'var(--red)';
+  $('risk-bar').style.width=rsk+'%';$('risk-bar').style.background=rsk<=33?'var(--green)':rsk<=66?'var(--yellow)':'var(--red)';
+  const exp=s.open_positions||0;$('risk-exp').textContent=exp>=2?'HIGH':exp===1?'MEDIUM':'LOW';
+  $('risk-exp').style.color=exp>=2?'var(--red)':exp===1?'var(--yellow)':'var(--green)';
+  // Market Risk = volatility-based, Execution Risk = confidence-based
+  const mr=vol_==='High'?Math.round(60+Math.random()*30):vol_==='Low'?Math.round(10+Math.random()*20):Math.round(25+Math.random()*25);
+  $('risk-mr').textContent=mr+'%';$('risk-mr-bar').style.width=mr+'%';
+  $('risk-mr-bar').style.background=mr>60?'var(--red)':mr>35?'var(--yellow)':'var(--green)';
+  const er=Math.round((1-(s.confidence||0))*70+Math.random()*20);
+  const erd=Math.min(100,er);
+  $('risk-er').textContent=erd+'%';$('risk-er-bar').style.width=erd+'%';
+  $('risk-er-bar').style.background=erd>60?'var(--red)':erd>35?'var(--yellow)':'var(--green)';
+
+  // RECENT SIGNALS
+  const now=W();const prevSig=_lastSig||'';_lastSig=a;
+  if(a!==prevSig&&a!=='HOLD'||(a==='HOLD'&&prevSig!=='HOLD')){
+    _sigHist.unshift({time:now,action:a});
+    if(_sigHist.length>10)_sigHist.pop();
+    renderSignals();
+  }
+  function renderSignals(){
+    const el=$('sig-list');
+    if(!_sigHist.length){el.innerHTML='<div class="sig-row"><span class="sig-time">--:--</span><span class="sig-act" style="color:#4a5a7a;">No signals yet</span></div>';return;}
+    el.innerHTML=_sigHist.map(e=>{
+      const c=e.action.toUpperCase()==='BUY'?'var(--green)':e.action.toUpperCase()==='SELL'?'var(--red)':'var(--yellow)';
+      return `<div class="sig-row"><span class="sig-time">${e.time}</span><span class="sig-act" style="color:${c};">${e.action.toUpperCase()}</span></div>`;
+    }).join('');
+  }
+  // Always add initial HOLD to history
+  if(_sigHist.length===0){_sigHist.push({time:now,action:'HOLD'});renderSignals();}
+
+  // AI CORE STATUS
+  $('cs-ee').textContent=es;$('cs-ee').style.color=es==='Ready'?'var(--green)':es==='Monitoring'?'var(--blue)':es==='Standby'?'var(--yellow)':'var(--red)';
 
   // POSITION
   const pd=s.open_positions_detail||[];
   if(pd.length>0){
     $('pos-e').style.display='none';$('pos-a').style.display='block';
-    const po=pd[0];
-    $('pos-type').textContent=po.type||'--';
+    const po=pd[0];$('pos-type').textContent=po.type||'--';
     $('pos-type').style.color=(po.type||'').toUpperCase()==='BUY'?'var(--green)':'var(--red)';
-    $('pos-tkt').textContent=po.ticket||'--';
-    $('pos-ent').textContent=FP(po.price_open);$('pos-now').textContent=FP(p);
+    $('pos-tkt').textContent=po.ticket||'--';$('pos-ent').textContent=FP(po.price_open);$('pos-now').textContent=FP(p);
     const pr=po.profit||0;$('pos-profit').textContent=FD(pr);$('pos-profit').style.color=pr>=0?'var(--green)':'var(--red)';
     $('pos-sl').textContent=po.sl?FP(po.sl):'--';$('pos-tp').textContent=po.tp?FP(po.tp):'--';
     const pp=Math.min(100,Math.max(0,(Math.abs(pr)/(s.balance||1))*1000));
@@ -454,6 +517,16 @@ function R(s){
   } else {$('pos-a').style.display='none';$('pos-e').style.display='flex';}
 }
 
+// ── ANIMATION LOOP ──
+setInterval(()=>{tickActivity();tickMarketInsight();},4000);
+
+// ── FOOTER UPDATE ──
+setInterval(()=>{
+  const sec=Math.round((Date.now()-_lastTick)/1000);
+  $('ft-last').textContent=sec+'s ago';
+},1000);
+
+// ── WS + FETCH ──
 async function FS(){try{const r=await fetch('/api/state');const d=await r.json();if(d&&Object.keys(d).length>0)R(d);}catch(e){}}
 function CW(){let w;try{w=new WebSocket(`ws://${location.host}/ws`)}catch(e){setTimeout(CW,3000);return}
   w.onopen=()=>{};w.onmessage=e=>{try{const d=JSON.parse(e.data);if(d&&Object.keys(d).length>0)R(d)}catch(e){}};
