@@ -165,12 +165,14 @@ class MarketScorer:
         elif candle_signal == -1:
             score += 20
 
+        # Price action scoring — FAKE_BREAKOUT/FAKE_BREAKDOWN adalah candle trap,
+        # harus dikurangi score-nya (bukan ditambah seperti bug sebelumnya)
         bullish_pa = pa_pattern in ["LIQUIDITY_GRAB", "REJECTION", "BREAKOUT"]
-        bearish_pa = pa_pattern in ["FAKE_BREAKOUT", "FAKE_BREAKDOWN"]
+        trap_pa = pa_pattern in ["FAKE_BREAKOUT", "FAKE_BREAKDOWN"]
 
         if bullish_pa:
             score += 15
-        elif bearish_pa:
-            score += 15
+        elif trap_pa:
+            score -= 20  # 🔴 PENALTY: fake breakout = candle trap, kurangi confidence!
 
         return min(score, 100)
