@@ -18,30 +18,34 @@
 }
 *{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI,sans-serif;}
 html,body{
-    width:100vw;height:100vh;overflow:hidden;
-    background:var(--bg);color:var(--text);padding:8px;
+    width:100vw;height:100dvh;overflow:hidden;
+    background:var(--bg);color:var(--text);padding:6px;
+}
+@supports not (height:100dvh){
+    html,body{height:calc(100vh - 40px);}
 }
 .dashboard{
     display:grid;
     grid-template-columns:repeat(12,1fr);
-    grid-template-rows:auto 1fr 1fr 0.8fr;
-    gap:8px;
+    grid-template-rows:auto 1fr 1fr auto;
+    gap:6px;
     height:100%;
 }
 .card{
     background:linear-gradient(180deg,#071224,#020b17);
     border:1px solid var(--border);
-    border-radius:12px;
-    padding:12px;
-    box-shadow:0 0 12px rgba(0,191,255,.08);
-    overflow:hidden;
+    border-radius:10px;
+    padding:10px;
+    box-shadow:0 0 10px rgba(0,191,255,.06);
     display:flex;flex-direction:column;
+    min-height:0;
+    overflow:hidden;
 }
 .header{
     grid-column:1/13;grid-row:1;
     display:flex;align-items:center;
     justify-content:space-between;flex-direction:row;
-    padding:8px 15px;min-height:48px;
+    padding:6px 12px;min-height:42px;
 }
 .signal{
     grid-column:1/5;grid-row:2/4;
@@ -56,21 +60,22 @@ html,body{
 .position{grid-column:1/9;grid-row:4;}
 .system{grid-column:9/13;grid-row:4;}
 
-.logo{display:flex;align-items:center;gap:12px;}
-.logo h1{font-size:24px;background:linear-gradient(135deg,#00bfff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
-.live{background:#0a3;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:1px;}
-.stat{text-align:center;font-size:12px;}
-.stat .value{color:var(--green);font-size:20px;font-weight:bold;}
+.logo{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.logo h1{font-size:22px;background:linear-gradient(135deg,#00bfff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.live{background:#0a3;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;}
+.stat{text-align:center;font-size:11px;flex-shrink:0;}
+.stat .value{color:var(--green);font-size:17px;font-weight:bold;}
 
 .title{
-    margin-bottom:6px;
-    font-size:16px;
+    margin-bottom:5px;
+    font-size:14px;
     color:white;
     font-weight:600;
     letter-spacing:.5px;
+    flex-shrink:0;
 }
 .hold{
-    font-size:144px;
+    font-size:140px;
     font-weight:900;
     text-align:center;
     line-height:1;
@@ -79,48 +84,48 @@ html,body{
     align-items:center;
     justify-content:center;
     letter-spacing:4px;
+    min-height:0;
 }
 .confidence{
     text-align:center;
-    font-size:52px;
+    font-size:48px;
     font-weight:700;
-    margin-top:2px;
     letter-spacing:1px;
+    flex-shrink:0;
 }
 .sig-info{
     text-align:center;
-    font-size:14px;
+    font-size:13px;
     color:#94a3b8;
-    margin:6px 0 4px;
+    margin:4px 0;
+    flex-shrink:0;
 }
 .sig-badge{
-    text-align:center;
-    font-size:11px;
-    padding:3px 12px;
+    font-size:10px;
+    padding:2px 10px;
     border-radius:4px;
     display:inline-block;
+    flex-shrink:0;
 }
-.table{width:100%;border-collapse:collapse;font-size:13px;}
+.table{width:100%;border-collapse:collapse;font-size:12px;}
 .table tr{border-bottom:1px solid #0d1f3d;}
-.table td{padding:5px 0;}
+.table td{padding:4px 0;}
 .green{color:var(--green);}
 .red{color:var(--red);}
 .yellow{color:var(--yellow);}
 .blue{color:var(--blue);}
-.progress{height:6px;background:#10213f;border-radius:20px;overflow:hidden;margin:4px 0;}
+.progress{height:5px;background:#10213f;border-radius:20px;overflow:hidden;margin:3px 0;flex-shrink:0;}
 .progress div{height:100%;background:var(--green);border-radius:20px;transition:width .5s ease;}
-.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
-.dot-green{background:var(--green);box-shadow:0 0 6px rgba(0,255,136,.4);}
-.dot-red{background:var(--red);box-shadow:0 0 6px rgba(255,77,77,.4);}
-.dot-yellow{background:var(--yellow);box-shadow:0 0 6px rgba(255,215,0,.4);}
-.dot-blue{background:var(--blue);box-shadow:0 0 6px rgba(0,191,255,.4);}
+.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px;flex-shrink:0;}
+.dot-green{background:var(--green);box-shadow:0 0 4px rgba(0,255,136,.4);}
+.dot-red{background:var(--red);box-shadow:0 0 4px rgba(255,77,77,.4);}
+.dot-yellow{background:var(--yellow);box-shadow:0 0 4px rgba(255,215,0,.4);}
+.dot-blue{background:var(--blue);box-shadow:0 0 4px rgba(0,191,255,.4);}
+.analysis-line{padding:3px 0;border-bottom:1px solid #0d1f3d;font-size:12px;color:#94a3b8;}
 
 .flex-center{display:flex;align-items:center;justify-content:center;}
-.f1{flex:1;}
+.f1{flex:1;min-height:0;}
 .text-xs{font-size:11px;color:#94a3b8;}
-.text-sm{font-size:13px;}
-.text-lg{font-size:18px;font-weight:700;}
-.text-xl{font-size:22px;font-weight:700;}
 .border-t{border-top:1px solid #0d1f3d;}
 
 @media(max-width:1200px){
@@ -136,143 +141,145 @@ html,body{
 <!-- ═══ HEADER ═══ -->
 <div class="card header">
     <div class="logo">
-        <i class="fa-solid fa-brain" style="font-size:28px;color:var(--blue);"></i>
+        <i class="fa-solid fa-brain" style="font-size:24px;color:var(--blue);"></i>
         <div>
             <h1>QUANTX AI</h1>
-            <small style="color:#4a5a7a;font-size:9px;letter-spacing:2px;text-transform:uppercase;">AI Trading System</small>
+            <small style="color:#4a5a7a;font-size:8px;letter-spacing:2px;text-transform:uppercase;">AI Trading System</small>
         </div>
         <span class="live">LIVE</span>
     </div>
-    <div class="stat"><small>PAIR</small><div class="value" id="h-pair">EURUSD</div></div>
-    <div class="stat"><small>PRICE</small><div class="value" id="h-price">0.00000</div></div>
-    <div class="stat"><small>SESSION</small><div style="font-size:15px;font-weight:700;" id="h-session">--</div></div>
-    <div class="stat"><small>AI</small><div class="green" style="font-size:15px;font-weight:700;" id="h-ai">ACTIVE</div></div>
-    <div class="stat"><small>TIME</small><div style="font-size:15px;font-weight:700;" id="h-time">--:--:--</div></div>
+    <div class="stat"><small>PAIR</small><div class="value" id="h-pair" style="font-size:15px;">EURUSD</div></div>
+    <div class="stat"><small>PRICE</small><div class="value" id="h-price" style="font-size:15px;">0.00000</div></div>
+    <div class="stat"><small>SESSION</small><div style="font-size:14px;font-weight:700;" id="h-session">--</div></div>
+    <div class="stat"><small>AI</small><div class="green" style="font-size:14px;font-weight:700;" id="h-ai">ACTIVE</div></div>
+    <div class="stat"><small>TIME</small><div style="font-size:14px;font-weight:700;" id="h-time">--:--:--</div></div>
 </div>
 
-<!-- ═══ SIGNAL (tall — spans 2 rows) ═══ -->
+<!-- ═══ SIGNAL (tall) ═══ -->
 <div class="card signal">
-    <h3 class="title"><i class="fa-solid fa-chart-line" style="color:var(--blue);margin-right:6px;"></i>AI SIGNAL</h3>
+    <h3 class="title"><i class="fa-solid fa-chart-line" style="color:var(--blue);margin-right:5px;"></i>AI SIGNAL</h3>
     <div class="hold" id="sig-action">HOLD</div>
     <div class="confidence" id="sig-conf">51%</div>
     <div class="sig-info">
         Trend: <b id="sig-trend">--</b> &nbsp;|&nbsp; <span id="sig-regime">--</span>
     </div>
-    <div style="text-align:center;">
+    <div style="text-align:center;flex-shrink:0;">
         <span class="sig-badge" id="sig-badge" style="background:rgba(255,215,0,.1);color:var(--yellow);border:1px solid rgba(255,215,0,.2);">WAITING</span>
     </div>
 </div>
 
 <!-- ═══ ANALYSIS ═══ -->
 <div class="card analysis">
-    <h3 class="title"><i class="fa-solid fa-microchip" style="color:var(--blue);margin-right:6px;"></i>AI ANALYSIS</h3>
-    <div style="font-size:17px;font-weight:700;margin-bottom:5px;color:var(--text);" id="ana-regime">--</div>
-    <table class="table" id="ana-table">
-        <tr><td style="width:75px;vertical-align:top;">Analysis</td><td id="ana-line1" style="font-size:12px;color:#94a3b8;">Waiting</td></tr>
-        <tr><td style="vertical-align:top;">Analysis</td><td id="ana-line2" style="font-size:12px;color:#94a3b8;">Waiting</td></tr>
-        <tr><td style="vertical-align:top;">Analysis</td><td id="ana-line3" style="font-size:12px;color:#94a3b8;">Waiting</td></tr>
-        <tr><td style="vertical-align:top;">Analysis</td><td id="ana-line4" style="font-size:12px;color:#94a3b8;">Waiting</td></tr>
-    </table>
+    <h3 class="title"><i class="fa-solid fa-microchip" style="color:var(--blue);margin-right:5px;"></i>AI ANALYSIS</h3>
+    <div style="font-size:15px;font-weight:700;margin-bottom:4px;flex-shrink:0;color:var(--text);" id="ana-regime">--</div>
+    <div class="f1" style="overflow-y:auto;">
+        <div class="analysis-line" id="ana-line1">Waiting for analysis...</div>
+        <div class="analysis-line" id="ana-line2"></div>
+        <div class="analysis-line" id="ana-line3"></div>
+        <div class="analysis-line" id="ana-line4"></div>
+    </div>
 </div>
 
 <!-- ═══ ACCOUNT ═══ -->
 <div class="card account">
-    <h3 class="title"><i class="fa-solid fa-wallet" style="color:var(--blue);margin-right:6px;"></i>ACCOUNT</h3>
-    <table class="table" style="font-size:13px;">
-        <tr><td>Balance</td><td style="text-align:right;font-weight:700;font-size:18px;" id="a-bal">$0</td></tr>
-        <tr><td>Equity</td><td style="text-align:right;font-weight:700;font-size:18px;" id="a-eq">$0</td></tr>
-        <tr><td>P/L</td><td style="text-align:right;font-weight:700;font-size:14px;" id="a-fl">$0.00</td></tr>
-        <tr><td>Drawdown</td><td style="text-align:right;font-weight:700;font-size:14px;" id="a-dd">0%</td></tr>
-        <tr><td>Margin</td><td style="text-align:right;font-weight:600;font-size:13px;" id="a-ml">0%</td></tr>
+    <h3 class="title"><i class="fa-solid fa-wallet" style="color:var(--blue);margin-right:5px;"></i>ACCOUNT</h3>
+    <table class="table" style="font-size:12px;">
+        <tr><td>Balance</td><td style="text-align:right;font-weight:700;font-size:17px;" id="a-bal">$0</td></tr>
+        <tr><td>Equity</td><td style="text-align:right;font-weight:700;font-size:17px;" id="a-eq">$0</td></tr>
+        <tr><td>P/L</td><td style="text-align:right;font-weight:700;font-size:13px;" id="a-fl">$0.00</td></tr>
+        <tr><td>Drawdown</td><td style="text-align:right;font-weight:700;font-size:13px;" id="a-dd">0%</td></tr>
+        <tr><td>Margin</td><td style="text-align:right;font-weight:600;font-size:12px;" id="a-ml">0%</td></tr>
     </table>
-    <div class="progress" style="margin-top:2px;"><div id="a-ml-bar" style="width:0%;background:var(--green);"></div></div>
+    <div class="progress"><div id="a-ml-bar" style="width:0%;background:var(--green);"></div></div>
 </div>
 
 <!-- ═══ INDICATOR ═══ -->
 <div class="card indicator">
-    <h3 class="title"><i class="fa-solid fa-chart-bar" style="color:var(--blue);margin-right:6px;"></i>INDICATOR</h3>
-    <table class="table" style="font-size:12px;">
-        <tr><td>RSI(14)</td><td id="i-rsi" style="text-align:right;font-weight:600;">--</td></tr>
-        <tr><td>MACD</td><td id="i-macd" style="text-align:right;font-weight:600;">--</td></tr>
-        <tr><td>ADX(14)</td><td id="i-adx" style="text-align:right;font-weight:600;">--</td></tr>
-        <tr><td>ATR</td><td id="i-atr" style="text-align:right;font-weight:600;">--</td></tr>
-        <tr><td>EMA 50</td><td id="i-e50" style="text-align:right;font-weight:600;">--</td></tr>
-        <tr><td>EMA 200</td><td id="i-e200" style="text-align:right;font-weight:600;">--</td></tr>
-    </table>
+    <h3 class="title"><i class="fa-solid fa-chart-bar" style="color:var(--blue);margin-right:5px;"></i>INDICATOR</h3>
+    <div class="f1" style="overflow-y:auto;">
+        <table class="table" style="font-size:12px;">
+            <tr><td>RSI(14)</td><td id="i-rsi" style="text-align:right;font-weight:600;">--</td></tr>
+            <tr><td>MACD</td><td id="i-macd" style="text-align:right;font-weight:600;">--</td></tr>
+            <tr><td>ADX(14)</td><td id="i-adx" style="text-align:right;font-weight:600;">--</td></tr>
+            <tr><td>ATR</td><td id="i-atr" style="text-align:right;font-weight:600;">--</td></tr>
+            <tr><td>EMA 50</td><td id="i-e50" style="text-align:right;font-weight:600;">--</td></tr>
+            <tr><td>EMA 200</td><td id="i-e200" style="text-align:right;font-weight:600;">--</td></tr>
+        </table>
+    </div>
 </div>
 
 <!-- ═══ STRUCTURE ═══ -->
 <div class="card structure">
-    <h3 class="title"><i class="fa-solid fa-layer-group" style="color:var(--blue);margin-right:6px;"></i>STRUCTURE</h3>
-    <div class="flex-center" style="justify-content:space-between;font-size:13px;">
-        <span>Trend</span><b id="ms-trend">--</b>
-    </div>
-    <div class="flex-center" style="justify-content:space-between;font-size:12px;color:#94a3b8;">
-        <span>BOS</span><b id="ms-bos">NO</b>
-    </div>
-    <div class="flex-center" style="justify-content:space-between;font-size:12px;color:#94a3b8;">
-        <span>CHOCH</span><b id="ms-ch">NO</b>
-    </div>
-    <div class="flex-center" style="justify-content:space-between;font-size:12px;color:#94a3b8;">
-        <span>Structure</span><b id="ms-ms">--</b>
-    </div>
-    <div style="margin-top:4px;">
-        <div class="flex-center" style="justify-content:space-between;font-size:11px;color:#94a3b8;">
-            <span>Strength</span><b id="ms-str">0%</b>
+    <h3 class="title"><i class="fa-solid fa-layer-group" style="color:var(--blue);margin-right:5px;"></i>STRUCTURE</h3>
+    <div style="font-size:12px;">
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;">
+            <span>Trend</span><b id="ms-trend">--</b>
         </div>
-        <div class="progress"><div id="ms-bar" style="width:0%;"></div></div>
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;color:#94a3b8;">
+            <span>BOS</span><b id="ms-bos">NO</b>
+        </div>
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;color:#94a3b8;">
+            <span>CHOCH</span><b id="ms-ch">NO</b>
+        </div>
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;color:#94a3b8;">
+            <span>Structure</span><b id="ms-ms">--</b>
+        </div>
+        <div style="margin-top:3px;">
+            <div class="flex-center" style="justify-content:space-between;font-size:11px;color:#94a3b8;">
+                <span>Strength</span><b id="ms-str">0%</b>
+            </div>
+            <div class="progress"><div id="ms-bar" style="width:0%;"></div></div>
+        </div>
     </div>
 </div>
 
 <!-- ═══ RISK ═══ -->
 <div class="card risk">
-    <h3 class="title"><i class="fa-solid fa-shield" style="color:var(--blue);margin-right:6px;"></i>RISK</h3>
-    <div style="font-size:13px;">
-        <div class="flex-center" style="justify-content:space-between;margin-bottom:2px;">
+    <h3 class="title"><i class="fa-solid fa-shield" style="color:var(--blue);margin-right:5px;"></i>RISK</h3>
+    <div style="font-size:12px;">
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;">
             <span>Level</span><b id="risk-lv">LOW</b>
         </div>
-        <div class="progress" style="height:6px;"><div id="risk-bar" style="width:0%;"></div></div>
-        <div class="flex-center" style="justify-content:space-between;">
+        <div class="progress" style="height:5px;"><div id="risk-bar" style="width:0%;"></div></div>
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;">
             <span>Lot</span><b id="risk-lot">0.03</b>
         </div>
-        <div class="flex-center" style="justify-content:space-between;">
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;">
             <span>SL</span><b id="risk-sl">30</b>
         </div>
-        <div class="flex-center" style="justify-content:space-between;">
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;">
             <span>TP</span><b id="risk-tp">60</b>
         </div>
-        <div class="flex-center" style="justify-content:space-between;">
+        <div class="flex-center" style="justify-content:space-between;padding:2px 0;">
             <span>R:R</span><b id="risk-rr">1:2</b>
         </div>
     </div>
 </div>
 
-<!-- ═══ POSITION (wide) ═══ -->
+<!-- ═══ POSITION ═══ -->
 <div class="card position">
-    <h3 class="title"><i class="fa-solid fa-briefcase" style="color:var(--blue);margin-right:6px;"></i>POSITION</h3>
+    <h3 class="title"><i class="fa-solid fa-briefcase" style="color:var(--blue);margin-right:5px;"></i>POSITION</h3>
     <div class="f1 flex-center" id="pos-c" style="flex-direction:column;justify-content:center;">
-        <!-- Empty state -->
-        <div id="pos-e" class="flex-center" style="flex-direction:column;gap:3px;">
-            <i class="fa-solid fa-circle-dot" style="font-size:22px;color:#2a4a6a;"></i>
-            <div style="color:#3d5a7a;font-size:15px;font-weight:600;">No Open Position</div>
-            <div style="color:#2a4a6a;font-size:12px;">Waiting for setup...</div>
+        <div id="pos-e" class="flex-center" style="flex-direction:column;gap:2px;">
+            <i class="fa-solid fa-circle-dot" style="font-size:20px;color:#2a4a6a;"></i>
+            <div style="color:#3d5a7a;font-size:14px;font-weight:600;">No Open Position</div>
+            <div style="color:#2a4a6a;font-size:11px;">Waiting for setup...</div>
         </div>
-        <!-- Active trade -->
         <div id="pos-a" style="display:none;width:100%;">
             <div class="flex-center" style="justify-content:space-between;">
-                <span style="font-size:22px;font-weight:900;" id="pos-type">BUY</span>
-                <span style="color:#4a5a7a;font-size:12px;">#<span id="pos-tkt">--</span></span>
+                <span style="font-size:20px;font-weight:900;" id="pos-type">BUY</span>
+                <span style="color:#4a5a7a;font-size:11px;">#<span id="pos-tkt">--</span></span>
             </div>
-            <div class="flex-center" style="justify-content:space-around;margin:8px 0 4px;">
-                <div style="text-align:center;"><span class="text-xs">Entry</span><br><b style="font-size:14px;" id="pos-ent">--</b></div>
-                <div style="text-align:center;"><span class="text-xs">Price</span><br><b style="font-size:14px;" id="pos-now">--</b></div>
-                <div style="text-align:center;"><span class="text-xs">Profit</span><br><b style="font-size:18px;" id="pos-profit">$0</b></div>
-                <div style="text-align:center;"><span class="text-xs">SL</span><br><b style="font-size:13px;" id="pos-sl">--</b></div>
-                <div style="text-align:center;"><span class="text-xs">TP</span><br><b style="font-size:13px;" id="pos-tp">--</b></div>
+            <div class="flex-center" style="justify-content:space-around;margin:5px 0 3px;">
+                <div style="text-align:center;"><span class="text-xs">Entry</span><br><b style="font-size:13px;" id="pos-ent">--</b></div>
+                <div style="text-align:center;"><span class="text-xs">Price</span><br><b style="font-size:13px;" id="pos-now">--</b></div>
+                <div style="text-align:center;"><span class="text-xs">Profit</span><br><b style="font-size:17px;" id="pos-profit">$0</b></div>
+                <div style="text-align:center;"><span class="text-xs">SL</span><br><b style="font-size:12px;" id="pos-sl">--</b></div>
+                <div style="text-align:center;"><span class="text-xs">TP</span><br><b style="font-size:12px;" id="pos-tp">--</b></div>
             </div>
-            <div class="progress" style="height:5px;"><div id="pos-bar" style="width:0%;"></div></div>
-            <div class="flex-center" style="justify-content:space-between;font-size:11px;color:#4a5a7a;margin-top:3px;">
-                <span>Duration: <b id="pos-dur">--</b></span>
+            <div class="progress" style="height:4px;"><div id="pos-bar" style="width:0%;"></div></div>
+            <div class="flex-center" style="justify-content:space-between;font-size:11px;color:#4a5a7a;margin-top:2px;">
+                <span>Dur: <b id="pos-dur">--</b></span>
                 <span>Dist: <b id="pos-dist">--</b></span>
             </div>
         </div>
@@ -281,15 +288,15 @@ html,body{
 
 <!-- ═══ SYSTEM ═══ -->
 <div class="card system">
-    <h3 class="title"><i class="fa-solid fa-server" style="color:var(--blue);margin-right:6px;"></i>SYSTEM</h3>
-    <div class="f1 flex-center" style="flex-direction:column;align-items:stretch;justify-content:center;gap:3px;">
-        <div style="font-size:13px;"><span class="status-dot dot-green"></span>AI Engine: <b id="sys-ai" style="float:right;">Running</b></div>
-        <div style="font-size:13px;"><span class="status-dot dot-green"></span>MT5: <b id="sys-mt5" style="float:right;">Connected</b></div>
-        <div style="font-size:13px;"><span class="status-dot dot-green"></span>Feed: <b id="sys-feed" style="float:right;">Realtime</b></div>
-        <div style="font-size:13px;"><span class="status-dot dot-blue"></span>Latency: <b id="sys-lat" style="float:right;">--</b></div>
-        <div style="border-top:1px solid #0d1f3d;margin-top:4px;padding-top:4px;font-size:13px;">
+    <h3 class="title"><i class="fa-solid fa-server" style="color:var(--blue);margin-right:5px;"></i>SYSTEM</h3>
+    <div class="f1 flex-center" style="flex-direction:column;align-items:stretch;justify-content:center;gap:2px;">
+        <div style="font-size:12px;"><span class="status-dot dot-green"></span>AI: <b id="sys-ai" style="float:right;">Run</b></div>
+        <div style="font-size:12px;"><span class="status-dot dot-green"></span>MT5: <b id="sys-mt5" style="float:right;">Conn</b></div>
+        <div style="font-size:12px;"><span class="status-dot dot-green"></span>Feed: <b id="sys-feed" style="float:right;">Live</b></div>
+        <div style="font-size:12px;"><span class="status-dot dot-blue"></span>Lat: <b id="sys-lat" style="float:right;">--</b></div>
+        <div class="border-t" style="margin-top:3px;padding-top:3px;font-size:12px;">
             <div class="flex-center" style="justify-content:space-between;"><span>Skill</span><b id="sys-skill">--</b></div>
-            <div class="flex-center" style="justify-content:space-between;"><span>OOS WR</span><b id="sys-oos">--</b></div>
+            <div class="flex-center" style="justify-content:space-between;"><span>OOS</span><b id="sys-oos">--</b></div>
             <div class="flex-center" style="justify-content:space-between;"><span>Trades</span><b id="sys-tr">0</b></div>
         </div>
     </div>
@@ -297,19 +304,15 @@ html,body{
 
 </div>
 
-<!-- ═══ JAVASCRIPT ═══ -->
 <script>
 (function(){'use strict';
-
 const $=i=>document.getElementById(i);
 const W=()=>new Date().toLocaleTimeString('en-US',{hour12:false});
 const FP=(v)=>(v==null||isNaN(v)?'0.00000':Number(v).toFixed(5));
 const FD=(v)=>{if(v==null||isNaN(v))return'$0';const n=Number(v);return Math.abs(n)>=1000?`$${n.toFixed(0)}`:`$${n.toFixed(2)}`};
-
 function R(s){
   if(!s||!Object.keys(s).length)return;
   const p=s.current_price||0;
-
   // HEADER
   $('h-pair').textContent=s.symbol||'--';
   const pe=$('h-price');pe.textContent=FP(p);
@@ -317,7 +320,6 @@ function R(s){
   const hr=new Date().getHours();let ss='Asia';
   if(hr>=7&&hr<12)ss='London';else if(hr>=12&&hr<16)ss='Overlap';else if(hr>=16||hr<22)ss='NY';
   $('h-session').textContent=ss;$('h-time').textContent=W();
-
   // SIGNAL
   const a=s.current_action||'HOLD';
   const se=$('sig-action');se.textContent=a;
@@ -334,12 +336,8 @@ function R(s){
     be.style.cssText='background:rgba(255,215,0,.1);color:var(--yellow);border:1px solid rgba(255,215,0,.2);';
   } else {
     be.textContent=a+' SIGNAL';
-    const col=a==='BUY'?'rgba(0,255,136,.2)':'rgba(255,77,77,.2)';
-    const bg=a==='BUY'?'rgba(0,255,136,.08)':'rgba(255,77,77,.08)';
-    const tc=a==='BUY'?'var(--green)':'var(--red)';
-    be.style.cssText=`background:${bg};color:${tc};border:1px solid ${col};`;
+    be.style.cssText=`background:${a==='BUY'?'rgba(0,255,136,.08)':'rgba(255,77,77,.08)'};color:${a==='BUY'?'var(--green)':'var(--red)'};border:1px solid ${a==='BUY'?'rgba(0,255,136,.2)':'rgba(255,77,77,.2)'};`;
   }
-
   // ANALYSIS
   $('ana-regime').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
   const rs=s.decision_reasons||s.no_trade_reasons||[];
@@ -349,111 +347,63 @@ function R(s){
   for(let i=1;i<=4;i++){
     const el=$('ana-line'+i);
     el.textContent=lines[i-1];
-    el.style.color='#94a3b8';
-    if(lines[i-1]&&lines[i-1].toUpperCase().includes('SELL')) el.style.color='var(--red)';
-    else if(lines[i-1]&&lines[i-1].toUpperCase().includes('BUY')) el.style.color='var(--green)';
+    el.style.color=lines[i-1]&&(lines[i-1].toUpperCase().includes('SELL')||lines[i-1].toUpperCase().includes('BEAR'))?'var(--red)':lines[i-1]&&(lines[i-1].toUpperCase().includes('BUY')||lines[i-1].toUpperCase().includes('BULL'))?'var(--green)':'#94a3b8';
   }
-
   // ACCOUNT
   $('a-bal').textContent=FD(s.balance);
   $('a-eq').textContent=FD(s.equity);
   const fl=s.floating_profit||0;
-  const fe=$('a-fl');fe.textContent=FD(fl);fe.style.color=fl>=0?'var(--green)':'var(--red)';
+  $('a-fl').textContent=FD(fl);$('a-fl').style.color=fl>=0?'var(--green)':'var(--red)';
   const dd=(s.drawdown||0)*100;
-  $('a-dd').textContent=dd.toFixed(1)+'%';
-  $('a-dd').style.color=dd>10?'var(--red)':dd>5?'var(--yellow)':'var(--green)';
+  $('a-dd').textContent=dd.toFixed(1)+'%';$('a-dd').style.color=dd>10?'var(--red)':dd>5?'var(--yellow)':'var(--green)';
   const ml=s.margin_level||0;
-  $('a-ml').textContent=ml>0?Number(ml).toFixed(0)+'%':'0%';
-  $('a-ml').style.color=ml>1000?'var(--green)':ml>500?'var(--yellow)':'var(--red)';
-  $('a-ml-bar').style.width=Math.min(100,ml/20)+'%';
-  $('a-ml-bar').style.background=ml>1000?'var(--green)':ml>500?'var(--yellow)':'var(--red)';
-
+  $('a-ml').textContent=ml>0?Number(ml).toFixed(0)+'%':'0%';$('a-ml').style.color=ml>1000?'var(--green)':ml>500?'var(--yellow)':'var(--red)';
+  $('a-ml-bar').style.width=Math.min(100,ml/20)+'%';$('a-ml-bar').style.background=ml>1000?'var(--green)':ml>500?'var(--yellow)':'var(--red)';
   // INDICATORS
-  const ri=s.rsi;
-  if(ri!=null){const e=$('i-rsi');e.textContent=Number(ri).toFixed(1);
-    e.style.color=ri>70||ri<30?'var(--red)':ri>60?'var(--green)':ri<40?'var(--red)':'var(--yellow)';}
-  const mc=s.macd;
-  if(mc!=null){const e=$('i-macd');e.textContent=Number(mc).toFixed(5);
-    e.style.color=mc>5e-4?'var(--green)':mc<-5e-4?'var(--red)':'var(--yellow)';}
-  const ad=s.adx;
-  if(ad!=null){const e=$('i-adx');e.textContent=Number(ad).toFixed(1);
-    e.style.color=ad>25?'var(--green)':ad>20?'var(--yellow)':'var(--red)';}
-  const at=s.atr;
-  if(at!=null){const e=$('i-atr');e.textContent=Number(at).toFixed(5);
-    e.style.color=at>5e-4?'var(--yellow)':at>2e-4?'var(--green)':'var(--blue)';}
-  const e50=s.ema_50;
-  if(e50!=null){const e=$('i-e50');e.textContent=Number(e50).toFixed(5);
-    e.style.color=e50>p?'var(--red)':'var(--green)';}
-  const e200=s.ema_200;
-  if(e200!=null){const e=$('i-e200');e.textContent=Number(e200).toFixed(5);
-    e.style.color=e200>p?'var(--red)':'var(--green)';}
-
+  const ri=s.rsi;if(ri!=null){const e=$('i-rsi');e.textContent=Number(ri).toFixed(1);e.style.color=ri>70||ri<30?'var(--red)':ri>60?'var(--green)':ri<40?'var(--red)':'var(--yellow)';}
+  const mc=s.macd;if(mc!=null){const e=$('i-macd');e.textContent=Number(mc).toFixed(5);e.style.color=mc>5e-4?'var(--green)':mc<-5e-4?'var(--red)':'var(--yellow)';}
+  const ad=s.adx;if(ad!=null){const e=$('i-adx');e.textContent=Number(ad).toFixed(1);e.style.color=ad>25?'var(--green)':ad>20?'var(--yellow)':'var(--red)';}
+  const at=s.atr;if(at!=null){const e=$('i-atr');e.textContent=Number(at).toFixed(5);e.style.color=at>5e-4?'var(--yellow)':at>2e-4?'var(--green)':'var(--blue)';}
+  const e50=s.ema_50;if(e50!=null){const e=$('i-e50');e.textContent=Number(e50).toFixed(5);e.style.color=e50>p?'var(--red)':'var(--green)';}
+  const e200=s.ema_200;if(e200!=null){const e=$('i-e200');e.textContent=Number(e200).toFixed(5);e.style.color=e200>p?'var(--red)':'var(--green)';}
   // STRUCTURE
-  $('ms-trend').textContent=s.trend||'--';
-  $('ms-trend').style.color=s.trend==='BULLISH'?'var(--green)':s.trend==='BEARISH'?'var(--red)':'var(--yellow)';
-  $('ms-bos').textContent=s.has_bos?'YES':'NO';
-  $('ms-bos').style.color=s.has_bos?'var(--red)':'#4a5a7a';
-  $('ms-ch').textContent=s.has_choch?'YES':'NO';
-  $('ms-ch').style.color=s.has_choch?'var(--red)':'#4a5a7a';
+  $('ms-trend').textContent=s.trend||'--';$('ms-trend').style.color=s.trend==='BULLISH'?'var(--green)':s.trend==='BEARISH'?'var(--red)':'var(--yellow)';
+  $('ms-bos').textContent=s.has_bos?'YES':'NO';$('ms-bos').style.color=s.has_bos?'var(--red)':'#4a5a7a';
+  $('ms-ch').textContent=s.has_choch?'YES':'NO';$('ms-ch').style.color=s.has_choch?'var(--red)':'#4a5a7a';
   $('ms-ms').textContent=s.market_structure||'--';
-  const str=(s.trend_strength||0)*100;
-  $('ms-str').textContent=Math.round(str)+'%';
-  $('ms-bar').style.width=str+'%';
-  $('ms-bar').style.background=str>50?'var(--green)':str>25?'var(--yellow)':'var(--red)';
-
+  const str=(s.trend_strength||0)*100;$('ms-str').textContent=Math.round(str)+'%';$('ms-bar').style.width=str+'%';$('ms-bar').style.background=str>50?'var(--green)':str>25?'var(--yellow)':'var(--red)';
   // POSITION
   const pd=s.open_positions_detail||[];
   if(pd.length>0){
     $('pos-e').style.display='none';$('pos-a').style.display='block';
     const po=pd[0];
-    $('pos-type').textContent=po.type||'--';
-    $('pos-type').style.color=(po.type||'').toUpperCase()==='BUY'?'var(--green)':'var(--red)';
-    $('pos-tkt').textContent=po.ticket||'--';
-    $('pos-ent').textContent=FP(po.price_open);
-    $('pos-now').textContent=FP(p);
-    const pr=po.profit||0;
-    $('pos-profit').textContent=FD(pr);
-    $('pos-profit').style.color=pr>=0?'var(--green)':'var(--red)';
-    $('pos-sl').textContent=po.sl?FP(po.sl):'--';
-    $('pos-tp').textContent=po.tp?FP(po.tp):'--';
+    $('pos-type').textContent=po.type||'--';$('pos-type').style.color=(po.type||'').toUpperCase()==='BUY'?'var(--green)':'var(--red)';
+    $('pos-tkt').textContent=po.ticket||'--';$('pos-ent').textContent=FP(po.price_open);$('pos-now').textContent=FP(p);
+    const pr=po.profit||0;$('pos-profit').textContent=FD(pr);$('pos-profit').style.color=pr>=0?'var(--green)':'var(--red)';
+    $('pos-sl').textContent=po.sl?FP(po.sl):'--';$('pos-tp').textContent=po.tp?FP(po.tp):'--';
     const pp=Math.min(100,Math.max(0,(Math.abs(pr)/(s.balance||1))*1000));
-    $('pos-bar').style.width=pp+'%';
-    $('pos-bar').style.background=pr>=0?'var(--green)':'var(--red)';
-    $('pos-dur').textContent=po.duration||'--';
-    $('pos-dist').textContent=po.distance||'--';
-  } else {
-    $('pos-a').style.display='none';$('pos-e').style.display='flex';
-  }
-
+    $('pos-bar').style.width=pp+'%';$('pos-bar').style.background=pr>=0?'var(--green)':'var(--red)';
+    $('pos-dur').textContent=po.duration||'--';$('pos-dist').textContent=po.distance||'--';
+  } else {$('pos-a').style.display='none';$('pos-e').style.display='flex';}
   // RISK
   const rsk=Math.min(100,Math.max(0,(1-(s.confidence||0))*100));
   $('risk-lv').textContent=rsk<=25?'LOW':rsk<=50?'MED':rsk<=75?'HIGH':'CRIT';
   $('risk-lv').style.color=rsk<=25?'var(--green)':rsk<=50?'var(--yellow)':rsk<=75?'#FF8C00':'var(--red)';
-  $('risk-bar').style.width=rsk+'%';
-  $('risk-bar').style.background=rsk<=25?'var(--green)':rsk<=50?'var(--yellow)':rsk<=75?'#FF8C00':'var(--red)';
-  $('risk-lot').textContent=s.lot_size||'0.03';
-  $('risk-sl').textContent=(s.stop_loss||'30')+' Pips';
-  $('risk-tp').textContent=(s.take_profit||'60')+' Pips';
+  $('risk-bar').style.width=rsk+'%';$('risk-bar').style.background=rsk<=25?'var(--green)':rsk<=50?'var(--yellow)':rsk<=75?'#FF8C00':'var(--red)';
+  $('risk-lot').textContent=s.lot_size||'0.03';$('risk-sl').textContent=(s.stop_loss||'30')+' Pips';$('risk-tp').textContent=(s.take_profit||'60')+' Pips';
   $('risk-rr').textContent='1:'+(((s.take_profit||60)/(s.stop_loss||30))||2).toFixed(0);
-
   // SYSTEM
-  const sk=s.skill_score||0;
-  const sl=s.skill_level||'';
-  $('sys-skill').textContent=sk+' '+(sl?sl:'');
+  $('sys-skill').textContent=(s.skill_score||0)+' '+(s.skill_level||'');
   const oos=s.models_summary?.M5?.oos?.win_rate;
-  $('sys-oos').textContent=oos!=null?oos+'%':'--';
-  $('sys-oos').style.color=oos!=null&&oos>50?'var(--green)':oos!=null&&oos>30?'var(--yellow)':'var(--text)';
+  $('sys-oos').textContent=oos!=null?oos+'%':'--';$('sys-oos').style.color=oos!=null&&oos>50?'var(--green)':oos!=null&&oos>30?'var(--yellow)':'var(--text)';
   $('sys-tr').textContent=s.total_trades||0;
 }
-
 async function FS(){try{const r=await fetch('/api/state');const d=await r.json();if(d&&Object.keys(d).length>0)R(d);}catch(e){}}
 function CW(){let w;try{w=new WebSocket(`ws://${location.host}/ws`)}catch(e){setTimeout(CW,3000);return}
-  w.onopen=()=>{};
-  w.onmessage=e=>{try{const d=JSON.parse(e.data);if(d&&Object.keys(d).length>0)R(d)}catch(e){}};
+  w.onopen=()=>{};w.onmessage=e=>{try{const d=JSON.parse(e.data);if(d&&Object.keys(d).length>0)R(d)}catch(e){}};
   w.onclose=()=>{setTimeout(CW,3000)};w.onerror=()=>{}
 }
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{FS();CW()});
-else{FS();CW()}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{FS();CW()});else{FS();CW()}
 })();
 </script>
 </body>
