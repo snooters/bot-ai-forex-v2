@@ -286,18 +286,33 @@ class DecisionEngine:
                     decision["no_trade"] = True
                     decision["no_trade_reasons"].append("Combined signal equal - HOLD")
 
-            # ── Trend-based direction override ──
+            # ── Trend-based direction override (ML-gated) ──
             if not decision["no_trade"]:
                 trend_dir = trend_result.get("direction", "")
                 current_action = decision.get("action", TradeDirection.HOLD.value)
+                ml_buy_prob = ml_signal.get("buy_prob", 0)
+                ml_sell_prob = ml_signal.get("sell_prob", 0)
+
                 if trend_dir == TrendDirection.STRONG_BULLISH.value:
                     if current_action in (TradeDirection.HOLD.value, TradeDirection.SELL.value):
-                        decision["action"] = TradeDirection.BUY.value
-                        decision["reasons"].append("Trend override: STRONG_BULLISH -> BUY")
+                        # Don't override if ML confidently disagrees
+                        if ml_sell_prob < 0.50:
+                            decision["action"] = TradeDirection.BUY.value
+                            decision["reasons"].append("Trend override: STRONG_BULLISH -> BUY")
+                        else:
+                            decision["reasons"].append(
+                                f"Trend override suppressed: ML sell_prob={ml_sell_prob:.2f}"
+                            )
                 elif trend_dir == TrendDirection.STRONG_BEARISH.value:
                     if current_action in (TradeDirection.HOLD.value, TradeDirection.BUY.value):
-                        decision["action"] = TradeDirection.SELL.value
-                        decision["reasons"].append("Trend override: STRONG_BEARISH -> SELL")
+                        # Don't override if ML confidently disagrees
+                        if ml_buy_prob < 0.50:
+                            decision["action"] = TradeDirection.SELL.value
+                            decision["reasons"].append("Trend override: STRONG_BEARISH -> SELL")
+                        else:
+                            decision["reasons"].append(
+                                f"Trend override suppressed: ML buy_prob={ml_buy_prob:.2f}"
+                            )
 
             # ── RSI + MACD safety override ──
             if not decision["no_trade"]:
@@ -306,7 +321,25 @@ class DecisionEngine:
                 macd_val = ind.get("macd", 0)
                 macd_sig = ind.get("macd_signal", 0)
                 current_action = decision.get("action", TradeDirection.HOLD.value)
-                if rsi_val < 30 and macd_val < macd_sig:
+
+                # Overbought: RSI > 70 → no BUY
+                if rsi_val > 70 and current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
+                    decision["action"] = TradeDirection.HOLD.value
+                    decision["no_trade"] = True
+                    decision["no_trade_reasons"].append(
+                        f"Safety: RSI={rsi_val:.1f} > 70 overbought, no BUY"
+                    )
+                    decision["reasons"].append("RSI overbought safety override")
+                # Oversold: RSI < 30 → no SELL
+                elif rsi_val < 30 and current_action in (TradeDirection.SELL.value, "WEAK_SELL"):
+                    decision["action"] = TradeDirection.HOLD.value
+                    decision["no_trade"] = True
+                    decision["no_trade_reasons"].append(
+                        f"Safety: RSI={rsi_val:.1f} < 30 oversold, no SELL"
+                    )
+                    decision["reasons"].append("RSI oversold safety override")
+                # MACD-confirmed extreme: keep existing combined checks
+                elif rsi_val < 30 and macd_val < macd_sig:
                     if current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
                         decision["action"] = TradeDirection.HOLD.value
                         decision["no_trade"] = True
@@ -495,6 +528,31 @@ class DecisionEngine:
                 atr_pct = atr / df["close"].iloc[-1]
                 if atr_pct > config.risk.get("max_atr_pct", 0.02):
                     return False
+
+        # ── Candle confirmation: prevent fake breakouts ──
+        # Require the last 2 COMPLETED candles to show momentum in signal direction.
+        # NOTE: df.iloc[-1] is the CURRENT (possibly incomplete) candle in LIVE mode
+        # because MT5 copy_rates_from_pos(start_pos=0) includes the forming candle.
+        # We use df.iloc[-3] (signal) and df.iloc[-2] (confirm) which are always completed.
+        if len(df) >= 4:
+            signal_candle = df.iloc[-3]
+            confirm_candle = df.iloc[-2]
+            sig_close = float(signal_candle.get("close", 0))
+            con_close = float(confirm_candle.get("close", 0))
+            con_open = float(confirm_candle.get("open", 0))
+
+            if direction == "BUY":
+                # Confirm candle must be bullish AND close higher than signal close
+                if con_close <= con_open:
+                    return False  # Bearish candle — does not confirm
+                if con_close <= sig_close:
+                    return False  # No upward momentum
+            elif direction == "SELL":
+                # Confirm candle must be bearish AND close lower than signal close
+                if con_close >= con_open:
+                    return False  # Bullish candle — does not confirm
+                if con_close >= sig_close:
+                    return False  # No downward momentum
 
         return True
 

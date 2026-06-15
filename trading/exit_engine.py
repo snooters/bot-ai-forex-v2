@@ -20,6 +20,13 @@ class ExitEngine:
         self.execution_engine = execution_engine
         self.data_engine = data_engine
 
+    def _get_elapsed_minutes(self, position: Dict) -> Optional[float]:
+        """Returns minutes elapsed since position open time, or None if unavailable."""
+        open_time = position.get("time")
+        if not open_time:
+            return None
+        return (datetime.now() - open_time).total_seconds() / 60.0
+
     def evaluate_exit(
         self,
         position: Dict,
@@ -50,39 +57,52 @@ class ExitEngine:
         profit_pips = max(profit_pips, 0) if current_profit > 0 else profit_pips
 
         # ── Trend reversal: hard close (with multi-TF confirmation) ──
+        # Rules:
+        # 1. Only close PROFITABLE positions — let SL handle losses
+        # 2. Minimum hold time (default 15 min) — let trade develop
+        # 3. Require 4/4: all 3 context TFs AND M5 direction against
         trend_reversed = False
         m5_dir = trend_result.get("direction", "")
         is_bearish = m5_dir in ["STRONG_BEARISH", "BEARISH", "WEAK_BEARISH"]
         is_bullish = m5_dir in ["STRONG_BULLISH", "BULLISH", "WEAK_BULLISH"]
 
-        if multi_tf_trends:
-            h4 = multi_tf_trends.get("trend240", 0)
-            h1 = multi_tf_trends.get("trend60", 0)
-            m30 = multi_tf_trends.get("trend30", 0)
-            tf_against = 0
-            if is_buy:
-                if h4 < 0: tf_against += 1
-                if h1 < 0: tf_against += 1
-                if m30 < 0: tf_against += 1
-                if is_bearish: tf_against += 1
-            else:
-                if h4 > 0: tf_against += 1
-                if h1 > 0: tf_against += 1
-                if m30 > 0: tf_against += 1
-                if is_bullish: tf_against += 1
-            trend_reversed = tf_against >= 3
-        else:
-            trend_reversed = (is_buy and is_bearish) or (not is_buy and is_bullish)
+        if current_profit > 0:
+            elapsed_min = self._get_elapsed_minutes(position)
+            min_hold = config.trading.get("min_hold_minutes", 15)
+            if elapsed_min is not None and elapsed_min >= min_hold:
+                if multi_tf_trends:
+                    h4 = multi_tf_trends.get("trend240", 0)
+                    h1 = multi_tf_trends.get("trend60", 0)
+                    m30 = multi_tf_trends.get("trend30", 0)
+                    tf_against = 0
+                    if is_buy:
+                        if h4 < 0: tf_against += 1
+                        if h1 < 0: tf_against += 1
+                        if m30 < 0: tf_against += 1
+                        if is_bearish: tf_against += 1
+                    else:
+                        if h4 > 0: tf_against += 1
+                        if h1 > 0: tf_against += 1
+                        if m30 > 0: tf_against += 1
+                        if is_bullish: tf_against += 1
+                    # Require all 4 checks to confirm genuine reversal
+                    trend_reversed = tf_against >= 4
+                else:
+                    # Fallback: only with limited data
+                    trend_reversed = (is_buy and is_bearish) or (not is_buy and is_bullish)
 
         if trend_reversed:
             action = PositionAction.FULL_CLOSE
             reasons.append("Trend reversed against position")
 
-        # ── Confidence crash: close ──
+        # ── Confidence crash: close (only after min hold time) ──
         if confidence < 0.30:
             if action != PositionAction.FULL_CLOSE:
-                action = PositionAction.FULL_CLOSE
-                reasons.append(f"Confidence dropped to {confidence:.0%}")
+                elapsed_min = self._get_elapsed_minutes(position)
+                min_hold = config.trading.get("min_hold_minutes", 15)
+                if elapsed_min is None or elapsed_min >= min_hold:
+                    action = PositionAction.FULL_CLOSE
+                    reasons.append(f"Confidence dropped to {confidence:.0%}")
 
         # ── Break of structure: close ──
         if market_structure:

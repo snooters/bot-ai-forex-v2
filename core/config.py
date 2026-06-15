@@ -46,9 +46,10 @@ class Config:
                 "adaptive_timeframe": self._get_bool("ADAPTIVE_TIMEFRAME", True),
                 "use_multi_timeframe": self._get_bool("USE_MULTI_TIMEFRAME", True),
                 "min_rr": self._get_float("MIN_RR", 1.33),
-                "min_profit_pips_exit": self._get_float("MIN_PROFIT_PIPS_EXIT", 5.0),
-                "min_profit_atr_exit": self._get_float("MIN_PROFIT_ATR_EXIT", 0.5),
-                "secure_close_threshold": self._get_int("SECURE_CLOSE_THRESHOLD", 55),
+                "min_profit_pips_exit": self._get_float("MIN_PROFIT_PIPS_EXIT", 15.0),
+                "min_profit_atr_exit": self._get_float("MIN_PROFIT_ATR_EXIT", 1.0),
+                "secure_close_threshold": self._get_int("SECURE_CLOSE_THRESHOLD", 85),
+                "min_hold_minutes": self._get_int("MIN_HOLD_MINUTES", 15),
             },
             "risk": {
                 "max_risk_pct": self._get_float("MAX_RISK_PCT", 0.005),
@@ -65,7 +66,7 @@ class Config:
                 "max_hold_hours": self._get_int("MAX_HOLD_HOURS", 12),
                 "max_atr_pct": self._get_float("MAX_ATR_PCT", 0.02),
                 "use_dynamic_risk": self._get_bool("USE_DYNAMIC_RISK", True),
-                "breakeven_trigger_pips": self._get_float("BREAKEVEN_TRIGGER_PIPS", 10),
+                "breakeven_trigger_pips": self._get_float("BREAKEVEN_TRIGGER_PIPS", 20),
             },
             "ai_filter": {
                 "min_confidence": self._get_float("MIN_CONFIDENCE", 0.55),

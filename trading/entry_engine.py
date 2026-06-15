@@ -31,24 +31,25 @@ class EntryEngine:
     def _check_candle_confirmation(self, df_entry, direction: str) -> bool:
         """Candle confirmation filter — mencegah candle trap / fake breakout.
 
-        Memeriksa apakah candle TERAKHIR (confirm candle) bergerak SEARAH
-        dengan sinyal dari candle SEBELUMNYA (signal candle).
+        Memeriksa apakah 2 candle TERAKHIR YANG SUDAH COMPLETED bergerak SEARAH
+        dengan sinyal entry.
 
         Untuk BUY:  confirm candle harus BULL (close > open) DAN close > signal close
         Untuk SELL: confirm candle harus BEAR (close < open) DAN close < signal close
 
-        Jika hanya ada 1 candle (belum ada konfirmasi), trade tetap diproses.
-        Jika konfirmasi gagal, entry dibatalkan (HOLD).
+        NOTE: df_entry.iloc[-1] adalah candle SAAT INI yang mungkin BELUM SELESAI
+        (karena MT5 copy_rates_from_pos(start_pos=0) menyertakan candle yang sedang
+        terbentuk). Gunakan iloc[-3] (signal) dan iloc[-2] (confirm) yang sudah pasti
+        completed.
         """
         try:
-            if df_entry is None or len(df_entry) < 2:
-                return True  # Tidak cukup data untuk konfirmasi
+            if df_entry is None or len(df_entry) < 4:
+                return True  # Tidak cukup data untuk konfirmasi (butuh >=4 untuk 2 completed candle)
 
-            signal_candle = df_entry.iloc[-2]
-            confirm_candle = df_entry.iloc[-1]
+            signal_candle = df_entry.iloc[-3]
+            confirm_candle = df_entry.iloc[-2]
 
             sig_close = float(signal_candle.get("close", 0))
-            sig_open = float(signal_candle.get("open", 0))
             con_close = float(confirm_candle.get("close", 0))
             con_open = float(confirm_candle.get("open", 0))
 

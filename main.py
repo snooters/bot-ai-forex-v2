@@ -1858,6 +1858,25 @@ async def cmd_simulate(bot: ForexBot, args: argparse.Namespace):
     sim_trades_with_feat = sum(1 for t in sim_trades if t.get("feature_vector"))
     print(f"\n  Trades with feature vector: {sim_trades_with_feat}/{len(sim_trades)}")
 
+    # Export trade details for analysis
+    export_path = f"data/sim_trades_{symbol}_{days}d.json"
+    try:
+        import json
+        class DateEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, (datetime, pd.Timestamp)):
+                    return obj.isoformat()
+                return str(obj)
+        export_trades = []
+        for t in sim_trades:
+            et = {k: v for k, v in t.items() if k != "feature_vector"}
+            export_trades.append(et)
+        with open(export_path, "w") as f:
+            json.dump(export_trades, f, cls=DateEncoder, indent=2)
+        print(f"\n  Trade details exported to {export_path}")
+    except Exception as e:
+        print(f"  Export warning: {e}")
+
     print("\n" + render_simulation_panel(result))
     bot._simulation_result = result
     await bot.shutdown(reason="Simulation complete")
