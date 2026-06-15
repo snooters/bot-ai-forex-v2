@@ -144,4 +144,4 @@ class ConfidenceCalculator:
         return 0.5
 
     def is_tradeable(self, confidence: float) -> bool:
-        return confidence >= config.ai_filter["min_confidence"]
+        return confidence >= 0.50

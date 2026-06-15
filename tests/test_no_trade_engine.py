@@ -12,12 +12,12 @@ class TestNoTradeEngine:
     def test_quality_gate_low_confidence(self):
         sev = self.engine.should_no_trade(confidence=0.30, market_score=70, spread=1)
         assert sev >= NoTradeEngine.CRITICAL
-        assert any("Quality gate" in r for r in self.engine.reasons)
+        assert any("Low confidence" in r for r in self.engine.reasons)
 
     def test_quality_gate_low_score(self):
         sev = self.engine.should_no_trade(confidence=0.75, market_score=20, spread=1)
         assert sev >= NoTradeEngine.CRITICAL
-        assert any("Quality gate" in r for r in self.engine.reasons)
+        assert any("Low market score" in r for r in self.engine.reasons)
 
     def test_high_spread_warning(self):
         sev = self.engine.should_no_trade(confidence=0.75, market_score=70, spread=10)

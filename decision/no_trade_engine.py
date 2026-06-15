@@ -32,31 +32,23 @@ class NoTradeEngine:
         if not config.ai_filter["allow_no_trade"]:
             return 0
 
-        # P3: Quality gate — unified threshold for all trends
-        QUALITY_MIN_CONF = 0.55
-        QUALITY_MIN_SCORE = 35
-        if confidence < QUALITY_MIN_CONF:
-            self._severity = max(self._severity, 2)
-            self._reasons.append(f"Quality gate: confidence {confidence:.0%} < {QUALITY_MIN_CONF:.0%}")
-        if market_score < QUALITY_MIN_SCORE:
-            self._severity = max(self._severity, 2)
-            self._reasons.append(f"Quality gate: market score {market_score} < {QUALITY_MIN_SCORE}")
-
+        # Confidence gate — hard floor dengan dynamic adjustment
+        QUALITY_MIN_CONF = 0.50
         dynamic_min = config.get_dynamic_min_confidence(balance)
-        min_conf = max(config.ai_filter["min_confidence"], dynamic_min)
+        min_conf = max(QUALITY_MIN_CONF, dynamic_min)
         if confidence < min_conf:
             gap = min_conf - confidence
-            if gap > 0.20:
+            if gap >= 0.20:
                 self._severity = max(self._severity, 2)
-                self._reasons.append(f"Critical low confidence: {confidence:.0%} < {min_conf:.0%}")
             else:
                 self._severity = max(self._severity, 1)
-                self._reasons.append(f"Low confidence: {confidence:.0%} < {min_conf:.0%}")
+            self._reasons.append(f"Low confidence: {confidence:.0%} < {min_conf:.0%}")
 
+        # Market score gate
         min_score = config.ai_filter["min_market_score"]
         if market_score < min_score:
             self._severity = max(self._severity, 2)
-            self._reasons.append(f"Critical low market score: {market_score} < {min_score}")
+            self._reasons.append(f"Low market score: {market_score} < {min_score}")
 
         max_spread = config.ai_filter["max_spread_pips"]
         if spread is not None and spread > max_spread:

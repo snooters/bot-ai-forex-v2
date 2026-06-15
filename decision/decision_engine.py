@@ -189,7 +189,7 @@ class DecisionEngine:
             reduce_size = memory_check.get("reduce_size", False)
 
             dynamic_min = config.get_dynamic_min_confidence(balance)
-            min_conf = max(config.ai_filter["min_confidence"], dynamic_min)
+            min_conf = max(0.50, dynamic_min)
 
             if confidence >= min_conf and confidence < 0.70:
                 trade_type = "WEAK_SIGNAL"
@@ -518,7 +518,7 @@ class DecisionEngine:
         sr_info: Dict,
         df,
     ) -> bool:
-        min_conf = config.ai_filter["min_confidence"]
+        min_conf = 0.50
         if confidence < min_conf * 0.8:
             return False
 

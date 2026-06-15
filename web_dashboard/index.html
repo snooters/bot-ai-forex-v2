@@ -406,8 +406,8 @@ function R(s){
   $('h-pair').textContent=s.symbol||'--';
   const pe=$('h-price');pe.textContent=FP(p);
   if(p>window._lp)pe.style.color='var(--green)';else if(p<window._lp)pe.style.color='var(--red)';window._lp=p;
-  const hr=new Date().getHours();let ss='Asia';
-  if(hr>=7&&hr<12)ss='London';else if(hr>=12&&hr<16)ss='Overlap';else if(hr>=16||hr<22)ss='NY';
+  const hu=new Date().getUTCHours();let ss;
+  if(hu>=22||hu<8)ss='Asia / Pacific';else if(hu>=8&&hu<13)ss='London';else if(hu>=13&&hu<16)ss='Overlap';else ss='New York';
   $('h-session').textContent=ss;$('h-time').textContent=W();
 
   // SIGNAL

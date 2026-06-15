@@ -377,7 +377,7 @@ class BacktestEngine:
             ml_signal = self.ml_predictor.get_buy_sell_hold(ml_window)
             confidence = ml_signal.get("confidence", 0)
             vol_level = vol_result.get("level", "low")
-            if confidence >= config.ai_filter["min_confidence"] and vol_level in ("low", "medium"):
+            if confidence >= 0.50 and vol_level in ("low", "medium"):
                 decision = {
                     "action": ml_signal.get("signal", "HOLD"),
                     "no_trade": False,
