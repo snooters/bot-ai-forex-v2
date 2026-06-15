@@ -445,21 +445,21 @@ function R(s){
   $('risk-exp').style.color=exp==='LOW'?'var(--green)':exp==='MEDIUM'?'var(--yellow)':'var(--red)';
 
   // AI INTELLIGENCE
-  const ts=(s.trend_strength||0)*100;
-  const cf=(s.confidence||0)*100;
-  const mq=Math.min(100,Math.max(0,Math.round(ts*0.6+cf*0.4)));
-  $('ai-mq').textContent=mq+'%';$('ai-mq-bar').style.width=mq+'%';
-  $('ai-mq-bar').style.background=mq>60?'var(--green)':mq>35?'var(--yellow)':'var(--red)';
-  $('ai-ts').textContent=Math.round(ts)+'%';$('ai-ts-bar').style.width=ts+'%';
-  $('ai-ts-bar').style.background=ts>50?'var(--green)':ts>25?'var(--yellow)':'var(--red)';
-  const vr=(s.regime||'').toUpperCase();
-  let vol='Normal';
-  if(vr.includes('VOLATILE')||vr.includes('HIGH')) vol='High'; else if(vr.includes('SIDEWAYS')) vol='Low';
-  $('ai-vol').textContent=vol;$('ai-vol').style.color=vol==='High'?'var(--red)':vol==='Low'?'var(--yellow)':'var(--green)';
-  const lq=marketLiquidity(s);$('ai-liq').textContent=lq;
-  $('ai-liq').style.color=lq==='High'?'var(--green)':lq==='Medium'?'var(--yellow)':'var(--red)';
-  $('ai-ready').textContent=Math.round(cf)+'%';$('ai-ready-bar').style.width=cf+'%';
-  $('ai-ready-bar').style.background=cf>60?'var(--green)':cf>35?'var(--yellow)':'var(--red)';
+  const ts_=(s.trend_strength||0)*100;
+  const cf_=(s.confidence||0)*100;
+  const mq_=Math.min(100,Math.max(0,Math.round(ts_*0.6+cf_*0.4)));
+  $('ai-mq').textContent=mq_+'%';$('ai-mq-bar').style.width=mq_+'%';
+  $('ai-mq-bar').style.background=mq_>60?'var(--green)':mq_>35?'var(--yellow)':'var(--red)';
+  $('ai-ts').textContent=Math.round(ts_)+'%';$('ai-ts-bar').style.width=ts_+'%';
+  $('ai-ts-bar').style.background=ts_>50?'var(--green)':ts_>25?'var(--yellow)':'var(--red)';
+  const vr_=(s.regime||'').toUpperCase();
+  let vol_='Normal';
+  if(vr_.includes('VOLATILE')||vr_.includes('HIGH')) vol_='High'; else if(vr_.includes('SIDEWAYS')) vol_='Low';
+  $('ai-vol').textContent=vol_;$('ai-vol').style.color=vol_==='High'?'var(--red)':vol_==='Low'?'var(--yellow)':'var(--green)';
+  const lq_=marketLiquidity(s);$('ai-liq').textContent=lq_;
+  $('ai-liq').style.color=lq_==='High'?'var(--green)':lq_==='Medium'?'var(--yellow)':'var(--red)';
+  $('ai-ready').textContent=Math.round(cf_)+'%';$('ai-ready-bar').style.width=cf_+'%';
+  $('ai-ready-bar').style.background=cf_>60?'var(--green)':cf_>35?'var(--yellow)':'var(--red)';
 
   // POSITION
   const pd=s.open_positions_detail||[];
