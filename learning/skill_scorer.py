@@ -73,6 +73,13 @@ class SkillScorer:
         return min(skills, key=skills.get)
 
     def _score_pair(self, trades: List[Dict]) -> int:
+        # Derive result from profit if "result" field is missing
+        for t in trades:
+            if "result" not in t or t.get("result") not in ("WIN", "LOSS"):
+                p = t.get("profit")
+                if p is not None:
+                    t["result"] = "WIN" if p > 0 else ("LOSS" if p < 0 else "BREAK")
+
         closed = [t for t in trades if t.get("result") in ("WIN", "LOSS")]
         if len(closed) < 3:
             return 0

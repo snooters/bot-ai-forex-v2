@@ -33,7 +33,7 @@ class NoTradeEngine:
             return 0
 
         # P3: Quality gate — unified threshold for all trends
-        QUALITY_MIN_CONF = 0.45
+        QUALITY_MIN_CONF = 0.55
         QUALITY_MIN_SCORE = 35
         if confidence < QUALITY_MIN_CONF:
             self._severity = max(self._severity, 2)
@@ -92,6 +92,11 @@ class NoTradeEngine:
                 if signal in ("BUY", "SELL"):
                     self._severity = max(self._severity, 1)
                     self._reasons.append(f"{regime} regime - direction signal discouraged")
+
+            # RANGING regime is a profit killer (PF=0.07 per audit) -- block immediately
+            if regime == "RANGING":
+                self._severity = max(self._severity, 2)
+                self._reasons.append("RANGING regime - no clear direction, blocking all trades")
 
             if regime in ("STRONG_TRENDING_BULLISH",):
                 if signal == "SELL":

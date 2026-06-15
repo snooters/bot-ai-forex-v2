@@ -1,0 +1,20 @@
+{
+  "version": "v15_M15",
+  "created_at": "2026-06-13T18:42:19.844455",
+  "timeframe": "M15",
+  "timeframe_minutes": 15,
+  "models": {
+    "xgboost": {
+      "path": "models\\model_v15_M15\\xgboost.ubj",
+      "trained": true
+    },
+    "random_forest": {
+      "path": "models\\model_v15_M15\\random_forest.ubj",
+      "trained": true
+    },
+    "lightgbm": {
+      "path": "models\\model_v15_M15\\lightgbm.ubj",
+      "trained": true
+    }
+  }
+}

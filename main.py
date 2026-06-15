@@ -252,6 +252,10 @@ class ForexBot:
                     X, y, trade_weights = self.model_trainer.incorporate_trade_outcomes(
                         X, y, features, pair=symbol, timeframe=tf, min_trades=5,
                     )
+                    # Extend recency weights to match merged length
+                    if recency is not None and len(recency) < len(X):
+                        pad_len = len(X) - len(recency)
+                        recency = np.hstack([recency, np.ones(pad_len, dtype=recency.dtype)])
                     self.logger.info(f"  {tf_label}: {len(X)} samples — training models...")
                     results = self.model_trainer.train_all_models(
                         X, y, feature_cols=features, recency_weights=recency,
@@ -1940,6 +1944,7 @@ async def cmd_self_learn(bot: ForexBot, args: argparse.Namespace):
             bot.logger.warning(f"  {tf_label}: no data, skipping")
             continue
         try:
+            bot.model_trainer.ensemble = VotingEnsemble()
             X, y, features, df_clean = bot.model_trainer.prepare_training_data(
                 df, pair=symbol, timeframe=tf,
             )
@@ -1955,8 +1960,12 @@ async def cmd_self_learn(bot: ForexBot, args: argparse.Namespace):
         recency = ModelTrainer.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
         X, y, sw = tot.merge_with_ohlc(X, y, X_sim, y_sim, upsample_wins=True, win_weight=2.0)
 
+        # Extend recency weights to match merged length (sim trades get weight 1.0)
+        if recency is not None and len(recency) < len(X):
+            pad_len = len(X) - len(recency)
+            recency = np.hstack([recency, np.ones(pad_len, dtype=recency.dtype)])
+
         bot.logger.info(f"  {tf_label}: {len(X)} samples — training...")
-        bot.model_trainer.ensemble = VotingEnsemble()
         results = bot.model_trainer.train_all_models(
             X, y, feature_cols=features, recency_weights=recency,
             trade_outcome_weights=sw, tf_label=tf_label,

@@ -137,12 +137,22 @@ class PositionManager:
 
         elif action == PositionAction.TRAILING_STOP:
             trailing_dist = atr * config.risk.get("trailing_atr_multiplier", 1.5) if atr > 0 else current_price * 0.001
+            entry = position.get("price_open", 0)
+            breakeven_pips = config.risk.get("breakeven_trigger_pips", 10)
+            breakeven_dist = breakeven_pips * 0.0001  # pip value assumption (hardcoded 4-digit)
             if position["type"] == "BUY":
                 new_sl = current_price - trailing_dist
+                # Breakeven floor: never let SL be below entry if profit > threshold
+                profit_dist = current_price - entry
+                if profit_dist > breakeven_dist:
+                    new_sl = max(new_sl, entry)
                 if new_sl > (position.get("sl", 0) or 0):
                     return self.execution_engine.modify_position(position["ticket"], sl=new_sl)
             else:
                 new_sl = current_price + trailing_dist
+                profit_dist = entry - current_price
+                if profit_dist > breakeven_dist:
+                    new_sl = min(new_sl, entry)
                 if new_sl < (position.get("sl", float("inf")) or float("inf")):
                     return self.execution_engine.modify_position(position["ticket"], sl=new_sl)
             return False

@@ -132,6 +132,11 @@ class AutoRetrainEngine:
             except Exception as e:
                 self.logger.warning(f"Trade outcome incorporation failed: {e}, continuing with OHLC data only")
 
+        # Extend recency weights to match merged length (trade samples get neutral weight)
+        if recency is not None and len(recency) < len(X):
+            pad_len = len(X) - len(recency)
+            recency = np.hstack([recency, np.ones(pad_len, dtype=recency.dtype)])
+
         self.logger.info(f"Training samples: {len(X)} | features: {len(features)} | labels: BUY={(y==0).sum()} SELL={(y==1).sum()} HOLD={(y==2).sum()}")
 
         try:

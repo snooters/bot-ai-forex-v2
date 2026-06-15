@@ -79,18 +79,14 @@ class MLPredictor:
             return None
 
         # Cek model pertama untuk jumlah fitur yang diharapkan
+        # Gunakan underlying model (model.model) bukan wrapper, karena wrapper
+        # (XGBoostModel/RandomForestModel/LightGBMModel) tidak memiliki n_features_in_
         expected = None
         for name, model in ensemble.models.items():
-            if hasattr(model, 'n_features_in_') and model.n_features_in_:
-                expected = model.n_features_in_
+            underlying = getattr(model, 'model', model)
+            if hasattr(underlying, 'n_features_in_') and underlying.n_features_in_:
+                expected = underlying.n_features_in_
                 break
-            # LightGBM
-            if hasattr(model, '_Booster') and hasattr(model._Booster, 'num_feature'):
-                try:
-                    expected = model._Booster.num_feature()
-                    break
-                except Exception:
-                    pass
 
         if expected is not None and expected != len(fcols):
             self.logger.warning(

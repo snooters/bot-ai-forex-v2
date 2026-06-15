@@ -85,17 +85,26 @@ class TradeMemory:
                     session TEXT,
                     indicators TEXT,
                     market_conditions TEXT,
-                    created_at TEXT
+                    created_at TEXT,
+                    ticket INTEGER DEFAULT 0
                 )
             """)
             try:
                 conn.execute("ALTER TABLE trades ADD COLUMN account_id TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN ticket INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_pair ON trades(pair)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_result ON trades(result)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_entry_time ON trades(entry_time)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_account_id ON trades(account_id)")
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_ticket ON trades(ticket)")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
             conn.close()
 
@@ -123,6 +132,7 @@ class TradeMemory:
         commission: float = 0.0,
         swap: float = 0.0,
         session: str = "",
+        ticket: int = 0,
     ):
         if indicators is None:
             indicators = {}
@@ -155,6 +165,7 @@ class TradeMemory:
             "commission": round(commission, 2),
             "swap": round(swap, 2),
             "session": session,
+            "ticket": ticket,
             "indicators": {k: round(v, 6) if isinstance(v, float) else v
                           for k, v in indicators.items() if k in INDICATOR_FIELDS},
             "market_conditions": market_conditions,
@@ -197,6 +208,7 @@ class TradeMemory:
             commission=trade.get("commission", 0),
             swap=trade.get("swap", 0),
             session=trade.get("session", ""),
+            ticket=trade.get("ticket", 0),
         )
 
     def _insert_sqlite(self, record: Dict):
@@ -210,8 +222,8 @@ class TradeMemory:
                      entry_time, exit_time, model_version, confidence,
                      trade_duration_minutes, max_dd_during_trade,
                      spread, commission, swap, session,
-                     indicators, market_conditions, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     indicators, market_conditions, created_at, ticket)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     record["trade_id"], record.get("account_id", self.account_id),
                     record["pair"], record["timeframe"],
@@ -226,6 +238,7 @@ class TradeMemory:
                     json.dumps(record.get("indicators", {})),
                     json.dumps(record.get("market_conditions", {})),
                     record["created_at"],
+                    record.get("ticket", 0),
                 ))
                 conn.commit()
                 conn.close()

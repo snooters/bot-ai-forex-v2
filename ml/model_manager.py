@@ -573,8 +573,17 @@ class ModelManager:
             return
         perf_path = version_dir / "performance.json"
         try:
+            # Merge dengan data existing (misal OOS result) agar tidak overwrite
+            existing = {}
+            if perf_path.exists():
+                try:
+                    with open(perf_path) as f:
+                        existing = json.load(f)
+                except Exception:
+                    pass
+            existing.update(performance)
             with open(perf_path, "w") as f:
-                json.dump(performance, f, indent=2)
+                json.dump(existing, f, indent=2)
             self.logger.info(f"Saved performance data for {version}")
         except Exception as e:
             self.logger.error(f"Failed to save performance for {version}: {e}")

@@ -18,6 +18,13 @@ class MistakeAnalyzer:
         self._report_file = self._report_dir / "mistake_report.json"
 
     def analyze_losses(self, trades: List[Dict]) -> Dict:
+        # Derive result from profit if "result" field is missing
+        for t in trades:
+            if "result" not in t or t.get("result") not in ("WIN", "LOSS"):
+                p = t.get("profit")
+                if p is not None:
+                    t["result"] = "WIN" if p > 0 else ("LOSS" if p < 0 else "BREAK")
+
         losses = [t for t in trades if t.get("result") == "LOSS"]
         all_closed = [t for t in trades if t.get("result") in ("WIN", "LOSS")]
 
@@ -36,6 +43,11 @@ class MistakeAnalyzer:
             "generated_at": datetime.now().isoformat(),
         }
 
+        # Normalize pair field: some trades use "symbol" instead of "pair"
+        for t_list in (losses, all_closed):
+            for t in t_list:
+                if t.get("pair", "unknown") == "unknown" and t.get("symbol"):
+                    t["pair"] = t["symbol"]
         report["by_pair"] = self._analyze_by_field(losses, all_closed, "pair")
         report["by_timeframe"] = self._analyze_by_field(losses, all_closed, "timeframe")
         report["by_direction"] = self._analyze_by_field(losses, all_closed, "direction")
@@ -57,7 +69,7 @@ class MistakeAnalyzer:
         report["summary"] = self._generate_summary(report)
 
         self._save_report(report)
-        self.logger.info(
+        self.logger.debug(
             f"Mistake analysis: {report['total_losses']} losses, "
             f"avg=${report['avg_loss']}, "
             f"worst pairs: {', '.join(report['by_pair']['worst'][:3])}"

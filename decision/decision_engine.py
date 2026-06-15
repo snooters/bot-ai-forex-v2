@@ -114,7 +114,9 @@ class DecisionEngine:
             decision["ml_signal"] = ml_signal
 
             new_regime = self._classify_regime(df)
-            if new_regime is not None:
+            if new_regime is not None and new_regime.get("confidence", 0) > 0.5:
+                # Only override caller's regime if classifier has meaningful confidence
+                # (>0.5 avoids replacing a pre-classified regime with fallback RANGING)
                 regime_result = new_regime
                 decision["regime_classifier"] = new_regime.get("regime")
 

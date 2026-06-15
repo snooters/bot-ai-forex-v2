@@ -1,0 +1,6 @@
+{
+  "method": "platt",
+  "brier_score": 0.19361691626677924,
+  "ece": 0.05026337309157875,
+  "num_classes": 3
+}

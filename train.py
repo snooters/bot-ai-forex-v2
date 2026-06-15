@@ -180,6 +180,19 @@ def train_m5_model(
 
     from ml.trainer import ModelTrainer as _MT
     recency = _MT.compute_recency_weights(df_clean["time"]) if "time" in df_clean.columns else None
+
+    # Feature selection may have reduced dimensions — disable warm-start if mismatch
+    if existing_ensemble is not None:
+        old_n = _get_ensemble_feature_count(existing_ensemble)
+        if old_n and old_n != len(features):
+            logger.info(
+                f"Warm-start disabled: model trained with {old_n} features, "
+                f"selected features = {len(features)}"
+            )
+            existing_ensemble = None
+            model_params = None
+            is_warm_start = False
+
     logger.info(f"Training samples: {len(X)} | Features: {len(features)}")
 
     try:

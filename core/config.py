@@ -65,9 +65,10 @@ class Config:
                 "max_hold_hours": self._get_int("MAX_HOLD_HOURS", 12),
                 "max_atr_pct": self._get_float("MAX_ATR_PCT", 0.02),
                 "use_dynamic_risk": self._get_bool("USE_DYNAMIC_RISK", True),
+                "breakeven_trigger_pips": self._get_float("BREAKEVEN_TRIGGER_PIPS", 10),
             },
             "ai_filter": {
-                "min_confidence": self._get_float("MIN_CONFIDENCE", 0.40),
+                "min_confidence": self._get_float("MIN_CONFIDENCE", 0.55),
                 "min_market_score": self._get_int("MIN_MARKET_SCORE", 30),
                 "allow_no_trade": self._get_bool("ALLOW_NO_TRADE", True),
                 "max_spread_pips": self._get_float("MAX_SPREAD_PIPS", 2.0),

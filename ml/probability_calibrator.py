@@ -119,7 +119,7 @@ class ProbabilityCalibrator:
     def save(self, path: str):
         import joblib
         p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p.mkdir(parents=True, exist_ok=True)
         for i, cal in self.calibrators.items():
             joblib.dump(cal, p / f"calibrator_{i}.pkl")
         meta = {

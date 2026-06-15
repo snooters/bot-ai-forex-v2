@@ -18,9 +18,9 @@ from utils.logger import get_logger
 from utils.decorators import measure_time, safe_execute
 
 
-# Target max features to reduce overfitting
-# 115 raw features → top 40 by importance keeps signal, reduces noise
-MAX_FEATURES_TARGET = 40
+# Max features: set high to keep ALL features. Feature selection
+# was too aggressive at 40 — v33_M5 proved 135 features work best (OOS 74.3).
+MAX_FEATURES_TARGET = 999
 
 
 class ModelTrainer:
@@ -277,12 +277,44 @@ class ModelTrainer:
         y_train, y_val = y_effective[:split_idx], y_effective[split_idx:]
 
         sample_weight = self._compute_sample_weights(y_train, multiplier=sample_weight_multiplier)
+
+        # ── Defensive alignment: recency_weights & trade_outcome_weights ──
+        # These can be shorter than X after merge_with_ohlc() appends sim trade
+        # samples. Pad with neutral weight 1.0 to prevent shape mismatch.
+        if recency_weights is not None and len(recency_weights) != len(X):
+            self.logger.warning(
+                f"Recency weights length {len(recency_weights)} != X length {len(X)} — "
+                f"padding/truncating to match (after sim trade merge)"
+            )
+            if len(recency_weights) > len(X):
+                recency_weights = recency_weights[:len(X)]
+            else:
+                recency_weights = np.pad(
+                    recency_weights,
+                    (0, len(X) - len(recency_weights)),
+                    mode='constant',
+                    constant_values=1.0,
+                )
         if recency_weights is not None:
             rw_train = recency_weights[:split_idx]
             sample_weight = sample_weight * rw_train
             self.logger.info(f"Recency weights applied: "
                              f"range=[{rw_train.min():.2f}, {rw_train.max():.2f}]")
 
+        if trade_outcome_weights is not None and len(trade_outcome_weights) != len(X):
+            self.logger.warning(
+                f"Trade outcome weights length {len(trade_outcome_weights)} != X length {len(X)} — "
+                f"padding/truncating to match"
+            )
+            if len(trade_outcome_weights) > len(X):
+                trade_outcome_weights = trade_outcome_weights[:len(X)]
+            else:
+                trade_outcome_weights = np.pad(
+                    trade_outcome_weights,
+                    (0, len(X) - len(trade_outcome_weights)),
+                    mode='constant',
+                    constant_values=1.0,
+                )
         if trade_outcome_weights is not None:
             tow_train = trade_outcome_weights[:split_idx]
             sample_weight = sample_weight * tow_train
@@ -434,6 +466,10 @@ class ModelTrainer:
             except Exception as e:
                 self.logger.warning(f"Calibration training failed: {e}")
                 results["calibration"] = {"error": str(e)}
+
+        # Safety net: pastikan feature_cols tersimpan di ensemble
+        if feature_cols is not None:
+            self.ensemble.feature_cols = feature_cols
 
         return results
 

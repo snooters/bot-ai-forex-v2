@@ -50,6 +50,15 @@ class TestNoTradeEngine:
         assert sev == NoTradeEngine.CRITICAL
         assert any("SELL signal in STRONG_TRENDING_BULLISH" in r for r in self.engine.reasons)
 
+    def test_ranging_regime_critical(self):
+        sev = self.engine.should_no_trade(
+            confidence=0.75, market_score=70, spread=1,
+            regime_result={"regime": "RANGING", "confidence": 0.35, "volatility_score": 20},
+            signal="BUY",
+        )
+        assert sev == NoTradeEngine.CRITICAL
+        assert any("RANGING" in r for r in self.engine.reasons)
+
     def test_no_warning_without_signal(self):
         sev = self.engine.should_no_trade(
             confidence=0.75, market_score=70, spread=1,

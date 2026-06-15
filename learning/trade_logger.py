@@ -162,22 +162,35 @@ class TradeLogger:
 
         existing_tickets = {t["ticket"] for t in self._trades}
         new_count = 0
-        deal_orders: Dict[int, List[Dict]] = {}
+        # FIX: Group by position_id instead of order.
+        # Entry and exit deals for the same position have the same position_id
+        # but DIFFERENT order numbers. Grouping by order causes entry/exit
+        # to be in separate groups, resulting in 0-duration trades.
+        deal_groups: Dict[int, List[Dict]] = {}
         for d in deals:
-            deal_orders.setdefault(d.get("order", 0), []).append(d)
+            pid = d.get("position_id", 0)
+            if pid == 0:
+                pid = d.get("order", 0)
+            deal_groups.setdefault(pid, []).append(d)
 
-        for order, order_deals in deal_orders.items():
-            if not order_deals:
+        for pid, group_deals in deal_groups.items():
+            if not group_deals:
                 continue
             entry_deal = None
             exit_deal = None
-            for d in order_deals:
+            total_profit = 0.0
+            total_swap = 0.0
+            total_commission = 0.0
+            for d in group_deals:
                 etype = d.get("entry", -1)
                 deal_type = d.get("type", -1)
                 if etype in (0, 1) and deal_type in (0, 1):
                     entry_deal = d
                 elif etype in (2, 3):
-                    exit_deal = d
+                    exit_deal = d  # keep last exit deal for price/timestamp
+                    total_profit += d.get("profit", 0) or 0
+                    total_swap += d.get("swap", 0) or 0
+                    total_commission += d.get("commission", 0) or 0
             if entry_deal is None:
                 continue
             ticket = entry_deal.get("position_id", entry_deal.get("ticket", 0))
@@ -191,11 +204,11 @@ class TradeLogger:
             volume = entry_deal.get("volume", 0)
             symbol = entry_deal.get("symbol", "")
             entry_ts = entry_deal.get("time", 0)
-            profit = 0
+            profit = 0.0
             exit_price = entry_price
             exit_ts = 0
             if exit_deal:
-                profit = exit_deal.get("profit", 0) + exit_deal.get("swap", 0) + exit_deal.get("commission", 0)
+                profit = total_profit + total_swap + total_commission
                 exit_price = exit_deal.get("price", entry_price)
                 exit_ts = exit_deal.get("time", 0)
             elif entry_deal.get("profit", 0) != 0:
@@ -208,9 +221,42 @@ class TradeLogger:
                 self.logger.debug(f"Skipping MT5 sync: no profit data for ticket {ticket}")
                 continue
 
+            # Try to load context data from trade_memory.db if available
+            db_conf = 0
+            db_market_score = 0
+            db_market_conditions = {}
+            db_timeframe = "M15"
+            db_model_version = "unknown"
+            try:
+                db_path = self._trade_dir / "trade_memory.db"
+                if db_path.exists():
+                    import sqlite3
+                    conn = sqlite3.connect(str(db_path))
+                    c = conn.cursor()
+                    c.execute(
+                        "SELECT confidence, market_conditions, timeframe, model_version "
+                        "FROM trades WHERE ticket = ?",
+                        (ticket,)
+                    )
+                    row = c.fetchone()
+                    if row:
+                        db_conf = row[0] or 0
+                        mc_raw = row[1]
+                        if mc_raw:
+                            try:
+                                db_market_conditions = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+                            except:
+                                db_market_conditions = {}
+                        db_timeframe = row[2] or "M15"
+                        db_model_version = row[3] or "unknown"
+                    conn.close()
+            except Exception:
+                pass
+
             trade_record = {
                 "ticket": ticket,
                 "symbol": symbol,
+                "pair": symbol,
                 "direction": direction,
                 "volume": float(volume),
                 "entry_price": float(entry_price),
@@ -222,11 +268,11 @@ class TradeLogger:
                 "profit": float(profit),
                 "profit_pips": float((exit_price - entry_price) / 0.0001) if direction == "BUY" else float((entry_price - exit_price) / 0.0001),
                 "exit_reason": "MT5",
-                "confidence": 0,
-                "market_score": 0,
-                "model_version": "unknown",
-                "timeframe": "M15",
-                "market_conditions": {},
+                "confidence": db_conf,
+                "market_score": db_market_score,
+                "model_version": db_model_version,
+                "timeframe": db_timeframe,
+                "market_conditions": db_market_conditions,
                 "synced_from_mt5": True,
             }
             if "JPY" in symbol.upper():
