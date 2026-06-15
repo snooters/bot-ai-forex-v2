@@ -74,10 +74,10 @@ class NoTradeEngine:
 
             if regime == "HIGH_VOLATILITY":
                 if vol_score > 80:
-                    self._severity = max(self._severity, 2)
+                    self._severity = max(self._severity, 1)
                     self._reasons.append(f"Extreme volatility (vol_score={vol_score})")
                 elif confidence < 0.75:
-                    self._severity = max(self._severity, 2)
+                    self._severity = max(self._severity, 1)
                     self._reasons.append(f"High volatility + low confidence ({confidence:.0%})")
 
             if regime in ("SIDEWAYS", "LOW_VOLATILITY"):
@@ -85,10 +85,9 @@ class NoTradeEngine:
                     self._severity = max(self._severity, 1)
                     self._reasons.append(f"{regime} regime - direction signal discouraged")
 
-            # RANGING regime is a profit killer (PF=0.07 per audit) -- block immediately
             if regime == "RANGING":
-                self._severity = max(self._severity, 2)
-                self._reasons.append("RANGING regime - no clear direction, blocking all trades")
+                self._severity = max(self._severity, 1)
+                self._reasons.append("RANGING regime - no clear direction, reducing confidence")
 
             if regime in ("STRONG_TRENDING_BULLISH",):
                 if signal == "SELL":

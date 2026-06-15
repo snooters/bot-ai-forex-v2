@@ -138,13 +138,6 @@ class DecisionEngine:
             )
             decision["confidence"] = confidence
 
-            if confidence == 0.0 and regime_result.get("regime") in ("NEWS_SHOCK",):
-                decision["no_trade"] = True
-                decision["no_trade_reasons"].append("NEWS_SHOCK regime — no trading")
-                decision["reasons"].append("Blocked by NEWS_SHOCK regime")
-                self._last_decision = decision
-                return decision
-
             balance = (account_info or {}).get("balance", 0)
             trend_dir = trend_result.get("direction", "SIDEWAYS")
             ml_signal_dir = ml_signal.get("signal", "HOLD")
@@ -401,17 +394,7 @@ class DecisionEngine:
                             f"MTF note: only {agree}/4 TFs bearish"
                         )
 
-            # ── Trend alignment enforcement from multi-TF consensus ──
-            if consensus and not decision["no_trade"]:
-                if not consensus.get("trend_aligned", True):
-                    decision["action"] = TradeDirection.HOLD.value
-                    decision["no_trade"] = True
-                    decision["no_trade_reasons"].append(
-                        f"Against dominant trend: {consensus.get('dominant_trend', 'unknown')}"
-                    )
-                    decision["reasons"].append(
-                        f"Consensus {consensus.get('signal','HOLD')} vs trend {consensus.get('dominant_trend','SIDEWAYS')}"
-                    )
+
 
             # ── Reversal WARNING: reduce confidence ──
             if reversal_info and reversal_info.get("severity") == TrendReversalDetector.WARNING and not decision["no_trade"]:
@@ -518,10 +501,6 @@ class DecisionEngine:
         sr_info: Dict,
         df,
     ) -> bool:
-        min_conf = 0.50
-        if confidence < min_conf * 0.8:
-            return False
-
         if "atr" in df.columns and not df["atr"].empty:
             atr = df["atr"].iloc[-1]
             if atr > 0:

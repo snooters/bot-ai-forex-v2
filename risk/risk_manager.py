@@ -67,12 +67,6 @@ class RiskManager:
             result["reasons"].append("Invalid stop loss distance")
             return result
 
-        rr_ratio = tp_pips / sl_pips if sl_pips > 0 else 0
-        min_rr = config.risk["rr_ratio"]
-        if rr_ratio < min_rr:
-            result["reasons"].append(f"Risk/reward {rr_ratio:.1f} below minimum {min_rr:.1f}")
-            return result
-
         pip_val = 0.01 if "JPY" in symbol.upper() else 0.0001
 
         aggr_mult = self.account_monitor.get_aggressiveness_multiplier()
