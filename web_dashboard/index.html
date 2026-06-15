@@ -2,534 +2,401 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0">
-<title>QUANTX AI — Command Center</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>QUANTX AI</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{
+html,body{
+  width:100vw;height:100vh;overflow:hidden;
   font-family:'Inter',sans-serif;
   background:#050B18;color:#fff;
-  width:1920px;height:1080px;overflow:hidden;
   display:flex;flex-direction:column;
 }
-::-webkit-scrollbar{width:2px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#1B2B4D;border-radius:2px}
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:4px 12px;flex-shrink:0;
+  background:linear-gradient(90deg,#0A1325,#050B18);
+  border-bottom:1px solid #1B2B4D;
+  min-height:28px;
+}
+footer{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:2px 12px;flex-shrink:0;
+  background:#0A1325;border-top:1px solid #1B2B4D;
+  font-size:8px;color:#4A5A7A;min-height:20px;
+}
+.grid-main{
+  flex:1;display:grid;gap:3px;padding:3px;min-height:0;
+  grid-template-columns:1fr 1fr 1fr;
+  grid-template-rows:1fr 1fr 1fr 1fr;
+}
 .card{
-  background:#0A1325;
-  border:1px solid #1B2B4D;
-  border-radius:12px;padding:10px 12px;
-  overflow:hidden;
-  display:flex;flex-direction:column;
+  background:#0A1325;border:1px solid #1B2B4D;
+  border-radius:8px;padding:5px 7px;
+  display:flex;flex-direction:column;overflow:hidden;
+  min-height:0;
 }
-.card:hover{border-color:#2B4D7D}
-.card-title{
-  font-size:8px;font-weight:700;text-transform:uppercase;
-  letter-spacing:1.5px;color:#4A5A7A;margin-bottom:6px;
-  flex-shrink:0;
+.card-t{
+  font-size:6px;font-weight:700;text-transform:uppercase;
+  letter-spacing:1.2px;color:#4A5A7A;
+  margin-bottom:3px;flex-shrink:0;
 }
-.gauge-svg{transform:rotate(-90deg)}
-.gauge-bg{fill:none;stroke:#1B2B4D;stroke-width:5}
-.gauge-fill{fill:none;stroke-width:5;stroke-linecap:round;transition:stroke-dashoffset .6s ease}
-.dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
-.dot-gr{background:#00FF88;box-shadow:0 0 6px rgba(0,255,136,.4)}
-.dot-rd{background:#FF4D4D;box-shadow:0 0 6px rgba(255,77,77,.4)}
-.dot-yl{background:#FFD700;box-shadow:0 0 6px rgba(255,215,0,.4)}
-.dot-bl{background:#00BFFF;box-shadow:0 0 6px rgba(0,191,255,.4)}
-.dot-org{background:#FF8C00;box-shadow:0 0 6px rgba(255,140,0,.4)}
-.log-entry{
-  display:flex;gap:6px;padding:1.5px 0;
-  font-size:10px;font-family:'Inter',monospace;
+.g-svg{transform:rotate(-90deg)}
+.g-bg{fill:none;stroke:#1B2B4D;stroke-width:4}
+.g-fill{fill:none;stroke-width:4;stroke-linecap:round;transition:stroke-dashoffset .5s ease}
+.dot{width:5px;height:5px;border-radius:50%;display:inline-block;flex-shrink:0}
+.dg{background:#00FF88;box-shadow:0 0 4px rgba(0,255,136,.4)}
+.dr{background:#FF4D4D;box-shadow:0 0 4px rgba(255,77,77,.4)}
+.dy{background:#FFD700;box-shadow:0 0 4px rgba(255,215,0,.4)}
+.db{background:#00BFFF;box-shadow:0 0 4px rgba(0,191,255,.4)}
+.do{background:#FF8C00;box-shadow:0 0 4px rgba(255,140,0,.4)}
+.le{
+  display:flex;gap:4px;padding:1px 0;
+  font-size:8px;font-family:'Inter',monospace;
   animation:fadeSlide .2s ease-out;
 }
-@keyframes fadeSlide{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-.log-time{color:#4A5A7A;width:52px;flex-shrink:0}
-.log-cat{width:44px;flex-shrink:0;font-size:8px;font-weight:700;letter-spacing:.8px;text-transform:uppercase}
-.cat-data{color:#00BFFF}
-.cat-analysis{color:#94A3B8}
-.cat-risk{color:#FFD700}
-.cat-signal{color:#00FF88}
-.cat-action{color:#FF4D4D}
-.log-msg{color:#CBD5E1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.log-highlight{color:#00FF88;font-weight:600}
-.hologram{
-  position:absolute;right:8px;top:8px;width:60px;height:60px;
-  opacity:.12;pointer-events:none;
-  background:radial-gradient(circle at 50% 50%,#00BFFF 0%,transparent 70%);
-  border-radius:50%;animation:pulse 3s ease-in-out infinite;
-}
-@keyframes pulse{0%,100%{opacity:.1;transform:scale(1)}50%{opacity:.18;transform:scale(1.05)}}
-.struct-line{stroke:#1B2B4D;stroke-width:1.5;fill:none}
-.struct-dot{fill:#fff;r:2}
-.struct-dot-hh{fill:#00FF88;r:2.5}
-.struct-dot-ll{fill:#FF4D4D;r:2.5}
-.struct-label{font-size:7px;fill:#4A5A7A;text-anchor:middle}
-.prog-track{width:100%;height:4px;background:#1B2B4D;border-radius:2px;overflow:hidden}
-.prog-fill{height:100%;border-radius:2px;transition:width .5s ease}
-.flex-center{display:flex;align-items:center;justify-content:center}
-.text-xxs{font-size:9px}
-.text-xxxs{font-size:8px}
+@keyframes fadeSlide{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+.lt{color:#4A5A7A;width:40px;flex-shrink:0}
+.lc{width:34px;flex-shrink:0;font-size:7px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+.lcd{color:#00BFFF}
+.lca{color:#94A3B8}
+.lcr{color:#FFD700}
+.lcs{color:#00FF88}
+.lcac{color:#FF4D4D}
+.lm{color:#CBD5E1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lh{color:#00FF88;font-weight:600}
+.pt{width:100%;height:3px;background:#1B2B4D;border-radius:2px;overflow:hidden}
+.pf{height:100%;border-radius:2px;transition:width .4s ease}
+.f12{display:flex;align-items:center;justify-content:center}
+.f1{flex:1}
+.t8{font-size:8px}
+.t9{font-size:9px}
+.t10{font-size:10px}
+.tc2{color:#4A5A7A}
 </style>
 </head>
 <body>
 
 <!-- ═══ HEADER ═══ -->
-<header class="flex items-center justify-between px-5 py-2 shrink-0" style="background:linear-gradient(90deg,#0A1325,#050B18);border-bottom:1px solid #1B2B4D;">
-  <div class="flex items-center gap-4">
-    <div>
-      <div class="text-base font-black tracking-widest" style="background:linear-gradient(135deg,#00BFFF,#00FF88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">QUANTX AI</div>
-      <div class="text-[8px] font-medium tracking-[2.5px] text-[#4A5A7A] leading-tight">AI TRADING SYSTEM</div>
-    </div>
-    <span class="px-2 py-0.5 rounded text-[9px] font-bold tracking-wider" style="color:#00FF88;border:1px solid rgba(0,255,136,.3);background:rgba(0,255,136,.08);">LIVE</span>
+<header>
+  <div class="f12" style="gap:8px">
+    <div style="font-size:11px;font-weight:900;letter-spacing:1.5px;background:linear-gradient(135deg,#00BFFF,#00FF88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">QUANTX AI</div>
+    <span style="font-size:7px;padding:1px 5px;border-radius:3px;font-weight:700;letter-spacing:1px;color:#00FF88;border:1px solid rgba(0,255,136,.3);background:rgba(0,255,136,.08);">LIVE</span>
   </div>
-  <div class="flex items-center gap-4">
-    <div class="text-right leading-tight">
-      <div class="text-xs font-bold tracking-wider text-white" id="h-symbol">EURUSD</div>
-      <div class="text-[8px] text-[#4A5A7A] tracking-wide">EURO / US DOLLAR</div>
-    </div>
-    <div class="text-right leading-tight">
-      <div class="text-lg font-black tracking-tight" id="h-price" style="font-variant-numeric:tabular-nums;">0.00000</div>
-      <div class="text-[9px] font-medium" id="h-change">+0.00000</div>
-    </div>
-    <div class="w-px h-6 bg-[#1B2B4D]"></div>
-    <div class="text-[9px] text-[#94A3B8] leading-tight">
-      <div>Spread: <span class="text-white font-medium" id="h-spread">0.0</span></div>
-      <div>Session: <span class="text-white font-medium" id="h-session">--</span></div>
-    </div>
-    <div class="w-px h-6 bg-[#1B2B4D]"></div>
-    <div class="text-[9px] text-[#94A3B8] leading-tight">
-      <div class="flex items-center gap-1"><span class="dot dot-gr"></span>AI <span class="text-white font-medium" id="h-ai-status">ACTIVE</span></div>
-      <div>Model: <span class="text-white font-medium" id="h-model">--</span></div>
-    </div>
-    <div class="text-[9px] text-[#4A5A7A]" id="h-time">--:--:--</div>
+  <div class="f12" style="gap:10px;font-size:9px;">
+    <div><span style="color:#94A3B8;">EURUSD</span> <b id="h-symbol">--</b></div>
+    <div><b id="h-price" style="font-size:13px;font-weight:900;font-variant-numeric:tabular-nums;">0.00000</b></div>
+    <div style="color:#4A5A7A;font-size:8px;">Spread <b id="h-spread" style="color:#fff;">0.0</b></div>
+    <div style="color:#4A5A7A;font-size:8px;"><b id="h-session" style="color:#fff;">--</b></div>
+    <div style="color:#4A5A7A;font-size:8px;"><span class="dot dg"></span> <b id="h-model" style="color:#fff;">--</b></div>
+    <div style="color:#4A5A7A;font-size:8px;" id="h-time">--:--</div>
   </div>
 </header>
 
-<!-- ═══ GRID: 4 ROWS × 3 COLS ═══ -->
-<main class="flex-1 grid gap-2 p-2" style="grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr 1fr;min-height:0;">
+<!-- ═══ GRID ═══ -->
+<div class="grid-main">
 
-  <!-- ═══ ROW 1 ═══ -->
+  <!-- ── ROW 1 ── -->
 
-  <!-- CARD 1: AI SIGNAL -->
+  <!-- C1: AI SIGNAL -->
   <div class="card">
-    <div class="card-title">AI Signal</div>
-    <div class="flex-1 flex flex-col justify-center">
-      <div class="flex items-center gap-4">
-        <div class="text-[40px] font-black leading-none tracking-tight" id="sig-action" style="transition:color .3s">HOLD</div>
-        <div class="relative shrink-0">
-          <svg width="76" height="76" class="gauge-svg">
-            <circle cx="38" cy="38" r="33" class="gauge-bg"/>
-            <circle cx="38" cy="38" r="33" class="gauge-fill" id="gauge-circle" stroke="#FFD700" stroke-dasharray="207.3" stroke-dashoffset="207.3"/>
-          </svg>
-          <div class="absolute inset-0 flex flex-col items-center justify-center">
-            <span class="text-base font-black" id="gauge-pct">0%</span>
-            <span class="text-[7px] text-[#4A5A7A] tracking-wider">CONF</span>
-          </div>
+    <div class="card-t">AI Signal</div>
+    <div class="f1 f12" style="gap:6px;justify-content:flex-start;">
+      <div style="font-size:22px;font-weight:900;line-height:1" id="sig-action">HOLD</div>
+      <div style="position:relative;flex-shrink:0;">
+        <svg width="48" height="48" class="g-svg">
+          <circle cx="24" cy="24" r="20" class="g-bg"/>
+          <circle cx="24" cy="24" r="20" class="g-fill" id="gauge-c" stroke="#FFD700" stroke-dasharray="125.7" stroke-dashoffset="125.7"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+          <span style="font-size:11px;font-weight:900" id="gauge-p">0%</span>
+          <span style="font-size:5px;color:#4A5A7A;letter-spacing:.5px;">CONF</span>
         </div>
       </div>
-      <div class="flex items-center gap-3 mt-1.5 text-xxs text-[#94A3B8]">
-        <span>Trend: <span class="font-semibold text-white" id="sig-trend">--</span></span>
-        <span class="w-px h-3 bg-[#1B2B4D]"></span>
-        <span id="sig-regime" class="text-xxs text-[#CBD5E1]">--</span>
-      </div>
-      <div class="mt-1">
-        <span class="px-2 py-0.5 rounded-full text-[9px] font-bold" id="sig-rec-badge" style="display:inline-block;background:rgba(255,215,0,.1);color:#FFD700;border:1px solid rgba(255,215,0,.2);">WAITING</span>
+    </div>
+    <div class="f12" style="gap:4px;margin-top:2px;font-size:8px;color:#94A3B8;flex-wrap:wrap;">
+      <span>T: <b id="sig-t" style="color:#fff;">--</b></span>
+      <span id="sig-r" style="color:#CBD5E1;">--</span>
+      <span id="sig-b" style="padding:0 4px;border-radius:3px;font-size:7px;font-weight:700;background:rgba(255,215,0,.1);color:#FFD700;border:1px solid rgba(255,215,0,.15);">WAITING</span>
+    </div>
+  </div>
+
+  <!-- C2: AI ANALYSIS -->
+  <div class="card" style="position:relative;">
+    <div style="position:absolute;right:6px;top:6px;width:36px;height:36px;opacity:.1;pointer-events:none;background:radial-gradient(circle at 50% 50%,#00BFFF 0%,transparent 70%);border-radius:50%;"></div>
+    <div class="card-t">AI Analysis</div>
+    <div class="f1 f12" style="flex-direction:column;align-items:stretch;justify-content:flex-start;">
+      <div style="font-size:9px;font-weight:700;" id="ana-r">--</div>
+      <ul style="font-size:7px;color:#94A3B8;line-height:1.3;margin:1px 0;" id="ana-reasons"><li>Waiting...</li></ul>
+      <div class="f12" style="margin-top:auto;padding-top:2px;border-top:1px solid #1B2B4D;gap:8px;">
+        <div><span style="font-size:6px;color:#4A5A7A;">Dec</span><br><b style="font-size:9px;" id="ana-d">HOLD</b></div>
+        <div><span style="font-size:6px;color:#4A5A7A;">Conf</span><br><b style="font-size:9px;" id="ana-c">0%</b></div>
       </div>
     </div>
   </div>
 
-  <!-- CARD 2: AI ANALYSIS -->
-  <div class="card relative">
-    <div class="hologram"></div>
-    <div class="card-title">AI Analysis</div>
-    <div class="flex-1 flex flex-col justify-between min-h-0">
-      <div class="min-h-0 overflow-hidden">
-        <div class="text-xs font-bold text-white leading-tight mb-1" id="ana-regime">--</div>
-        <ul class="text-xxxs text-[#94A3B8] space-y-0.5 leading-relaxed line-clamp-4" id="ana-reasons">
-          <li>Waiting for analysis...</li>
-        </ul>
-      </div>
-      <div class="flex items-center justify-between pt-1.5 mt-1 border-t border-[#1B2B4D]">
-        <div>
-          <div class="text-xxxs text-[#4A5A7A]">Decision</div>
-          <div class="text-sm font-bold" id="ana-decision" style="transition:color .3s">HOLD</div>
-        </div>
-        <div class="text-right">
-          <div class="text-xxxs text-[#4A5A7A]">Confidence</div>
-          <div class="text-sm font-bold" id="ana-confidence">0%</div>
-        </div>
-      </div>
+  <!-- C3: ACCOUNT -->
+  <div class="card">
+    <div class="card-t">Account</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;font-size:9px;align-content:center;flex:1;">
+      <div><span class="t8 tc2">Balance</span><br><b style="font-size:13px;font-weight:900;color:#fff;" id="a-bal">$0</b></div>
+      <div><span class="t8 tc2">Equity</span><br><b style="font-size:13px;font-weight:900;color:#fff;" id="a-eq">$0</b></div>
+      <div><span class="t8 tc2">P/L</span><br><b style="font-size:9px;" id="a-fl">$0</b></div>
+      <div><span class="t8 tc2">Free</span><br><b style="font-size:9px;color:#fff;" id="a-free">$0</b></div>
+      <div><span class="t8 tc2">Margin Lvl</span><br><b style="font-size:9px;" id="a-ml">0%</b></div>
+      <div><span class="t8 tc2">DD</span><br><b style="font-size:9px;" id="a-dd">0.0%</b></div>
     </div>
   </div>
 
-  <!-- CARD 3: ACCOUNT OVERVIEW -->
-  <div class="card">
-    <div class="card-title">Account Overview</div>
-    <div class="flex-1 grid grid-cols-2 gap-x-3 gap-y-0.5 content-center">
-      <div><div class="text-xxxs text-[#4A5A7A]">Balance</div><div class="text-base font-black text-white" id="acct-balance">$0</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Equity</div><div class="text-base font-black text-white" id="acct-equity">$0</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Floating P/L</div><div class="text-xs font-bold" id="acct-floating">$0</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Free Margin</div><div class="text-xs font-bold text-white" id="acct-free">$0</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Margin Level</div><div class="text-xs font-bold" id="acct-margin-lvl">0%</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Daily P/L</div><div class="text-xs font-bold" id="acct-daily-pl">$0</div></div>
-      <div class="col-span-2 mt-0.5">
-        <div class="flex items-center gap-2">
-          <span class="text-xxxs text-[#4A5A7A]">Drawdown</span>
-          <span class="text-xs font-bold" id="acct-dd">0.0%</span>
-          <div class="flex-1 prog-track"><div class="prog-fill" id="dd-bar" style="width:0%"></div></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- ── ROW 2 ── -->
 
-  <!-- ═══ ROW 2 ═══ -->
-
-  <!-- CARD 4: INDICATOR ANALYSIS -->
+  <!-- C4: INDICATORS -->
   <div class="card">
-    <div class="card-title">Indicator Analysis</div>
-    <div class="flex-1 min-h-0">
-      <table class="w-full text-xxs" style="border-collapse:collapse">
-        <thead><tr class="text-[#4A5A7A] text-[7px] uppercase tracking-wider">
-          <th class="text-left py-0.5 font-medium w-[30%]">Indicator</th>
-          <th class="text-right py-0.5 font-medium w-[28%]">Value</th>
-          <th class="text-right py-0.5 font-medium w-[26%]">Signal</th>
-          <th class="text-center py-0.5 font-medium w-[16%]">Sts</th>
-        </tr></thead>
-        <tbody id="ind-tbody">
-          <tr><td class="py-1 text-[#94A3B8]">RSI(14)</td><td class="text-right font-medium" id="ind-rsi">--</td><td class="text-right font-medium" id="ind-rsi-sig">--</td><td class="text-center" id="ind-rsi-sts"><span class="dot dot-yl"></span></td></tr>
-          <tr><td class="py-1 text-[#94A3B8]">MACD(12,26,9)</td><td class="text-right font-medium" id="ind-macd">--</td><td class="text-right font-medium" id="ind-macd-sig">--</td><td class="text-center" id="ind-macd-sts"><span class="dot dot-yl"></span></td></tr>
-          <tr><td class="py-1 text-[#94A3B8]">ADX(14)</td><td class="text-right font-medium" id="ind-adx">--</td><td class="text-right font-medium" id="ind-adx-sig">--</td><td class="text-center" id="ind-adx-sts"><span class="dot dot-yl"></span></td></tr>
-          <tr><td class="py-1 text-[#94A3B8]">ATR(14)</td><td class="text-right font-medium" id="ind-atr">--</td><td class="text-right font-medium" id="ind-atr-sig">--</td><td class="text-center" id="ind-atr-sts"><span class="dot dot-yl"></span></td></tr>
-          <tr><td class="py-1 text-[#94A3B8]">EMA 50</td><td class="text-right font-medium" id="ind-ema50">--</td><td class="text-right font-medium" id="ind-ema50-sig">--</td><td class="text-center" id="ind-ema50-sts"><span class="dot dot-yl"></span></td></tr>
-          <tr><td class="py-1 text-[#94A3B8]">EMA 200</td><td class="text-right font-medium" id="ind-ema200">--</td><td class="text-right font-medium" id="ind-ema200-sig">--</td><td class="text-center" id="ind-ema200-sts"><span class="dot dot-yl"></span></td></tr>
+    <div class="card-t">Indicators</div>
+    <div style="font-size:7px;flex:1;min-height:0;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="color:#4A5A7A;font-size:6px;text-transform:uppercase;letter-spacing:.5px;"><th style="text-align:left;padding:1px 0;">Indicator</th><th style="text-align:right;padding:1px 0;">Val</th><th style="text-align:right;padding:1px 0;">Signal</th><th style="text-align:center;padding:1px 0;">St</th></tr></thead>
+        <tbody id="ind-t">
+          <tr><td style="padding:2px 0;color:#94A3B8;">RSI</td><td style="text-align:right;font-weight:600;" id="i-rsi">--</td><td style="text-align:right;font-weight:600;" id="i-rsi-s">--</td><td style="text-align:center;" id="i-rsi-d"><span class="dot dy"></span></td></tr>
+          <tr><td style="padding:2px 0;color:#94A3B8;">MACD</td><td style="text-align:right;font-weight:600;" id="i-macd">--</td><td style="text-align:right;font-weight:600;" id="i-macd-s">--</td><td style="text-align:center;" id="i-macd-d"><span class="dot dy"></span></td></tr>
+          <tr><td style="padding:2px 0;color:#94A3B8;">ADX</td><td style="text-align:right;font-weight:600;" id="i-adx">--</td><td style="text-align:right;font-weight:600;" id="i-adx-s">--</td><td style="text-align:center;" id="i-adx-d"><span class="dot dy"></span></td></tr>
+          <tr><td style="padding:2px 0;color:#94A3B8;">ATR</td><td style="text-align:right;font-weight:600;" id="i-atr">--</td><td style="text-align:right;font-weight:600;" id="i-atr-s">--</td><td style="text-align:center;" id="i-atr-d"><span class="dot dy"></span></td></tr>
+          <tr><td style="padding:2px 0;color:#94A3B8;">EMA50</td><td style="text-align:right;font-weight:600;" id="i-e50">--</td><td style="text-align:right;font-weight:600;" id="i-e50-s">--</td><td style="text-align:center;" id="i-e50-d"><span class="dot dy"></span></td></tr>
+          <tr><td style="padding:2px 0;color:#94A3B8;">EMA200</td><td style="text-align:right;font-weight:600;" id="i-e200">--</td><td style="text-align:right;font-weight:600;" id="i-e200-s">--</td><td style="text-align:center;" id="i-e200-d"><span class="dot dy"></span></td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- CARD 5: MARKET STRUCTURE -->
+  <!-- C5: MARKET STRUCTURE -->
   <div class="card">
-    <div class="card-title">Market Structure</div>
-    <div class="flex-1 flex gap-2 min-h-0">
-      <div class="flex-1 space-y-0 text-xxs">
-        <div class="flex justify-between py-0.5"><span class="text-[#94A3B8]">Trend</span><span class="font-semibold" id="ms-trend">--</span></div>
-        <div class="flex justify-between py-0.5"><span class="text-[#94A3B8]">BOS</span><span class="font-semibold" id="ms-bos">NO</span></div>
-        <div class="flex justify-between py-0.5"><span class="text-[#94A3B8]">CHOCH</span><span class="font-semibold" id="ms-choch">NO</span></div>
-        <div class="flex justify-between py-0.5"><span class="text-[#94A3B8]">Higher High</span><span class="font-semibold" id="ms-hh">NO</span></div>
-        <div class="flex justify-between py-0.5"><span class="text-[#94A3B8]">Lower High</span><span class="font-semibold" id="ms-lh">NO</span></div>
-        <div class="flex justify-between py-0.5"><span class="text-[#94A3B8]">Structure Str</span><span class="font-semibold" id="ms-strength">0%</span></div>
+    <div class="card-t">Market Structure</div>
+    <div class="f12" style="gap:4px;flex:1;">
+      <div style="font-size:8px;flex:1;">
+        <div class="f12" style="justify-content:space-between;padding:1px 0;"><span class="tc2">Trend</span><b id="ms-t">--</b></div>
+        <div class="f12" style="justify-content:space-between;padding:1px 0;"><span class="tc2">BOS</span><b id="ms-bos">NO</b></div>
+        <div class="f12" style="justify-content:space-between;padding:1px 0;"><span class="tc2">CHOCH</span><b id="ms-ch">NO</b></div>
+        <div class="f12" style="justify-content:space-between;padding:1px 0;"><span class="tc2">HH</span><b id="ms-hh">NO</b></div>
+        <div class="f12" style="justify-content:space-between;padding:1px 0;"><span class="tc2">LH/LL</span><b id="ms-lh">NO</b></div>
+        <div class="f12" style="justify-content:space-between;padding:1px 0;"><span class="tc2">Str</span><b id="ms-str">0%</b></div>
       </div>
-      <div class="w-14 shrink-0 self-center">
-        <svg viewBox="0 0 60 45" class="w-full">
-          <polyline class="struct-line" points="8,38 20,15 32,28 44,12 56,24" id="struct-poly"/>
-          <circle class="struct-dot" cx="8" cy="38"/>
-          <circle class="struct-dot" cx="20" cy="15"/>
-          <circle class="struct-dot" cx="32" cy="28"/>
-          <circle class="struct-dot" cx="44" cy="12"/>
-          <circle class="struct-dot" cx="56" cy="24"/>
-          <text class="struct-label" x="32" y="43">MKT</text>
+      <svg viewBox="0 0 48 36" style="width:48px;flex-shrink:0;align-self:center;">
+        <polyline style="stroke:#1B2B4D;stroke-width:1.5;fill:none;" points="6,30 16,12 26,22 36,10 44,20" id="ms-poly"/>
+        <circle r="1.5" fill="#fff" cx="6" cy="30"/>
+        <circle r="1.5" fill="#fff" cx="16" cy="12"/>
+        <circle r="1.5" fill="#fff" cx="26" cy="22"/>
+        <circle r="1.5" fill="#fff" cx="36" cy="10"/>
+        <circle r="1.5" fill="#fff" cx="44" cy="20"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- C6: PERFORMANCE -->
+  <div class="card">
+    <div class="card-t">Performance</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px;font-size:9px;align-content:center;flex:1;">
+      <div><span class="t8 tc2">Today P/L</span><br><b style="font-size:13px;font-weight:900;" id="p-today">$0</b></div>
+      <div><span class="t8 tc2">Trades</span><br><b style="font-size:13px;font-weight:900;color:#fff;" id="p-tr">0</b></div>
+      <div><span class="t8 tc2">Win Rate</span><br><b style="font-size:9px;" id="p-wr">0%</b></div>
+      <div><span class="t8 tc2">PF</span><br><b style="font-size:9px;" id="p-pf">0.0</b></div>
+      <div><span class="t8 tc2">Best</span><br><b style="font-size:8px;color:#00FF88;" id="p-best">$0</b></div>
+      <div><span class="t8 tc2">Worst</span><br><b style="font-size:8px;color:#FF4D4D;" id="p-worst">$0</b></div>
+    </div>
+  </div>
+
+  <!-- ── ROW 3 ── -->
+
+  <!-- C7: AI PREDICTION -->
+  <div class="card">
+    <div class="card-t">AI Prediction</div>
+    <div class="f12" style="flex-direction:column;gap:2px;flex:1;justify-content:center;">
+      <div><div class="f12" style="justify-content:space-between;font-size:8px;"><span class="tc2">15M</span><b id="pr-15m">--</b></div><div class="pt"><div class="pf" id="pr-15m-b" style="width:0%"></div></div></div>
+      <div><div class="f12" style="justify-content:space-between;font-size:8px;"><span class="tc2">1H</span><b id="pr-1h">--</b></div><div class="pt"><div class="pf" id="pr-1h-b" style="width:0%"></div></div></div>
+      <div><div class="f12" style="justify-content:space-between;font-size:8px;"><span class="tc2">4H</span><b id="pr-4h">--</b></div><div class="pt"><div class="pf" id="pr-4h-b" style="width:0%"></div></div></div>
+      <div class="f12" style="gap:4px;padding-top:2px;border-top:1px solid #1B2B4D;margin-top:2px;"><span class="t8 tc2">Bias:</span><b style="font-size:9px;" id="pr-bias">--</b></div>
+    </div>
+  </div>
+
+  <!-- C8: OPEN POSITION -->
+  <div class="card">
+    <div class="card-t">Position</div>
+    <div class="f12 f1" id="pos-c">
+      <div id="pos-e" class="f12" style="flex-direction:column;gap:2px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4A5A7A" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        <div style="font-size:9px;color:#4A5A7A;">NO POSITION</div>
+        <div style="font-size:7px;color:#4A5A7A;">Waiting for setup</div>
+      </div>
+      <div id="pos-a" style="display:none;width:100%;">
+        <div class="f12" style="gap:6px;font-size:10px;"><b id="pos-typ">BUY</b><span style="color:#94A3B8;font-size:8px;">#<span id="pos-tkt">--</span></span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;text-align:center;font-size:8px;">
+          <div><span class="t8 tc2">Entry</span><br><b id="pos-ent">--</b></div>
+          <div><span class="t8 tc2">Now</span><br><b id="pos-now">--</b></div>
+          <div><span class="t8 tc2">Profit</span><br><b id="pos-profit">$0</b></div>
+        </div>
+        <div class="pt" style="margin-top:2px;"><div class="pf" id="pos-pbar" style="width:0%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- C9: RISK -->
+  <div class="card">
+    <div class="card-t">Risk Manager</div>
+    <div class="f12" style="gap:6px;flex:1;">
+      <div style="position:relative;flex-shrink:0;">
+        <svg width="48" height="48" class="g-svg">
+          <circle cx="24" cy="24" r="20" class="g-bg" stroke-width="4"/>
+          <circle cx="24" cy="24" r="20" class="g-fill" id="risk-g" stroke="#00FF88" stroke-dasharray="125.7" stroke-dashoffset="125.7"/>
         </svg>
-      </div>
-    </div>
-  </div>
-
-  <!-- CARD 6: PERFORMANCE -->
-  <div class="card">
-    <div class="card-title">Performance</div>
-    <div class="flex-1 grid grid-cols-2 gap-x-3 gap-y-0.5 content-center">
-      <div><div class="text-xxxs text-[#4A5A7A]">Today P/L</div><div class="text-base font-black" id="perf-today">$0.00</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Trades</div><div class="text-base font-black text-white" id="perf-trades">0</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Win Rate</div><div class="text-xs font-bold" id="perf-wr">0%</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Profit Factor</div><div class="text-xs font-bold" id="perf-pf">0.00</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Best Trade</div><div class="text-xs font-bold text-[#00FF88]" id="perf-best">$0.00</div></div>
-      <div><div class="text-xxxs text-[#4A5A7A]">Worst Trade</div><div class="text-xs font-bold text-[#FF4D4D]" id="perf-worst">$0.00</div></div>
-    </div>
-  </div>
-
-  <!-- ═══ ROW 3 ═══ -->
-
-  <!-- CARD 7: AI PREDICTION -->
-  <div class="card">
-    <div class="card-title">AI Prediction</div>
-    <div class="flex-1 flex flex-col justify-center gap-1.5">
-      <div>
-        <div class="flex justify-between text-xxxs mb-0.5"><span class="text-[#94A3B8]">15 MIN</span><span class="font-bold" id="pred-15m-val">--</span></div>
-        <div class="prog-track"><div class="prog-fill" id="pred-15m-bar" style="width:0%"></div></div>
-      </div>
-      <div>
-        <div class="flex justify-between text-xxxs mb-0.5"><span class="text-[#94A3B8]">1 HOUR</span><span class="font-bold" id="pred-1h-val">--</span></div>
-        <div class="prog-track"><div class="prog-fill" id="pred-1h-bar" style="width:0%"></div></div>
-      </div>
-      <div>
-        <div class="flex justify-between text-xxxs mb-0.5"><span class="text-[#94A3B8]">4 HOUR</span><span class="font-bold" id="pred-4h-val">--</span></div>
-        <div class="prog-track"><div class="prog-fill" id="pred-4h-bar" style="width:0%"></div></div>
-      </div>
-      <div class="flex items-center gap-2 pt-1 border-t border-[#1B2B4D]">
-        <span class="text-xxxs text-[#4A5A7A]">Bias:</span>
-        <span class="text-xs font-bold" id="pred-bias">--</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- CARD 8: OPEN POSITION -->
-  <div class="card">
-    <div class="card-title">Open Position</div>
-    <div class="flex-1 flex-center" id="pos-container">
-      <div id="pos-empty" class="flex flex-col items-center gap-1.5 text-center">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4A5A7A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-        <div class="text-xs font-medium text-[#4A5A7A]">NO OPEN POSITION</div>
-        <div class="text-xxxs text-[#4A5A7A]">Waiting for high probability setup</div>
-      </div>
-      <div id="pos-active" class="w-full hidden">
-        <div class="flex items-center gap-2 mb-1.5">
-          <span class="text-base font-black" id="pos-type">BUY</span>
-          <span class="text-xxxs text-[#94A3B8]">#<span id="pos-ticket">--</span></span>
-        </div>
-        <div class="grid grid-cols-3 gap-2 text-center text-xxs">
-          <div><div class="text-xxxs text-[#4A5A7A]">Entry</div><div class="font-bold" id="pos-entry">--</div></div>
-          <div><div class="text-xxxs text-[#4A5A7A]">Now</div><div class="font-bold" id="pos-current">--</div></div>
-          <div><div class="text-xxxs text-[#4A5A7A]">Profit</div><div class="font-bold" id="pos-profit">$0</div></div>
-        </div>
-        <div class="mt-1 prog-track"><div class="prog-fill" id="pos-profit-bar" style="width:0%"></div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- CARD 9: RISK MANAGER -->
-  <div class="card">
-    <div class="card-title">Risk Manager</div>
-    <div class="flex-1 flex items-center gap-3">
-      <div class="relative shrink-0">
-        <svg width="72" height="72" class="gauge-svg">
-          <circle cx="36" cy="36" r="31" class="gauge-bg" stroke-width="4"/>
-          <circle cx="36" cy="36" r="31" class="gauge-fill" id="risk-gauge" stroke="#00FF88" stroke-dasharray="194.8" stroke-dashoffset="194.8"/>
-        </svg>
-        <div class="absolute inset-0 flex flex-col items-center justify-center">
-          <span class="text-sm font-black" id="risk-score">0</span>
-          <span class="text-[6px] text-[#4A5A7A] tracking-wider">/100</span>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+          <span style="font-size:10px;font-weight:900" id="risk-sc">0</span>
+          <span style="font-size:5px;color:#4A5A7A;">/100</span>
         </div>
       </div>
-      <div class="flex-1 space-y-0.5 text-xxs">
-        <div class="flex justify-between"><span class="text-[#94A3B8]">Level</span><span class="font-semibold text-[#00FF88]" id="risk-level">LOW</span></div>
-        <div class="flex justify-between"><span class="text-[#94A3B8]">Recommend Lot</span><span class="font-semibold" id="risk-lot">0.03</span></div>
-        <div class="flex justify-between"><span class="text-[#94A3B8]">SL / TP</span><span class="font-semibold" id="risk-sl-tp">30 / 60</span></div>
-        <div class="flex justify-between"><span class="text-[#94A3B8]">R:R</span><span class="font-semibold text-[#00FF88]" id="risk-rr">1:2</span></div>
-        <div class="flex justify-between"><span class="text-[#94A3B8]">Daily Max Risk</span><span class="font-semibold" id="risk-max">2%</span></div>
+      <div style="font-size:8px;flex:1;">
+        <div class="f12" style="justify-content:space-between;"><span class="tc2">Level</span><b id="risk-lv">LOW</b></div>
+        <div class="f12" style="justify-content:space-between;"><span class="tc2">SL/TP</span><b id="risk-st">30/60</b></div>
+        <div class="f12" style="justify-content:space-between;"><span class="tc2">R:R</span><b id="risk-rr">1:2</b></div>
+        <div class="f12" style="justify-content:space-between;"><span class="tc2">Max Risk</span><b id="risk-mx">2%</b></div>
       </div>
     </div>
   </div>
 
-  <!-- ═══ ROW 4 ═══ -->
+  <!-- ── ROW 4 ── -->
 
-  <!-- CARD 10: LIVE ACTIVITY LOG (span 2 columns) -->
+  <!-- C10: ACTIVITY LOG (span 2) -->
   <div class="card" style="grid-column:span 2;">
-    <div class="card-title">Live AI Activity Log</div>
-    <div class="flex-1 overflow-y-auto min-h-0" id="log-container">
-      <div class="log-entry"><span class="log-time">--:--:--</span><span class="log-cat cat-data">DATA</span><span class="log-msg">Waiting for activity...</span></div>
+    <div class="card-t">AI Activity Log</div>
+    <div style="flex:1;overflow-y:auto;min-height:0;" id="log-c">
+      <div class="le"><span class="lt">--:--:--</span><span class="lc lcd">DATA</span><span class="lm">Waiting...</span></div>
     </div>
   </div>
 
-  <!-- CARD 11: SYSTEM STATUS -->
+  <!-- C11: SYSTEM STATUS -->
   <div class="card">
-    <div class="card-title">System Status</div>
-    <div class="flex-1 flex flex-col justify-center gap-1">
-      <div class="flex items-center gap-2 text-xxs">
-        <span class="dot dot-gr"></span><span class="text-[#94A3B8]">AI Engine:</span><span class="font-semibold ml-auto" id="sys-ai">Running</span>
-      </div>
-      <div class="flex items-center gap-2 text-xxs">
-        <span class="dot dot-gr"></span><span class="text-[#94A3B8]">MT5:</span><span class="font-semibold ml-auto" id="sys-mt5">Connected</span>
-      </div>
-      <div class="flex items-center gap-2 text-xxs">
-        <span class="dot dot-gr"></span><span class="text-[#94A3B8]">Broker:</span><span class="font-semibold ml-auto" id="sys-broker">Connected</span>
-      </div>
-      <div class="flex items-center gap-2 text-xxs">
-        <span class="dot dot-gr"></span><span class="text-[#94A3B8]">Data Feed:</span><span class="font-semibold ml-auto" id="sys-feed">Realtime</span>
-      </div>
-      <div class="flex items-center gap-2 text-xxs">
-        <span class="dot dot-bl"></span><span class="text-[#94A3B8]">Latency:</span><span class="font-semibold ml-auto" id="sys-latency">--</span>
-      </div>
-      <div class="pt-1 mt-1 border-t border-[#1B2B4D]">
-        <div class="flex items-center gap-2 text-xxs">
-          <span class="text-[#94A3B8]">Model:</span>
-          <span class="font-semibold text-[#00BFFF]" id="sys-model">--</span>
-          <span class="text-[#00FF88] text-xxxs ml-auto" id="sys-model-status">Optimal</span>
-        </div>
-        <div class="flex items-center gap-2 text-xxs mt-0.5">
-          <span class="text-[#94A3B8]">OOS WR:</span>
-          <span class="font-semibold" id="sys-accuracy">--</span>
-        </div>
+    <div class="card-t">System</div>
+    <div style="font-size:8px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:1px;">
+      <div class="f12" style="gap:3px;"><span class="dot dg"></span><span class="tc2">AI:</span><b class="ml-auto" id="sys-ai">Running</b></div>
+      <div class="f12" style="gap:3px;"><span class="dot dg"></span><span class="tc2">MT5:</span><b class="ml-auto" id="sys-mt5">OK</b></div>
+      <div class="f12" style="gap:3px;"><span class="dot dg"></span><span class="tc2">Feed:</span><b class="ml-auto" id="sys-feed">Live</b></div>
+      <div class="f12" style="gap:3px;"><span class="dot db"></span><span class="tc2">Latency:</span><b class="ml-auto" id="sys-lat">--</b></div>
+      <div style="border-top:1px solid #1B2B4D;margin-top:1px;padding-top:1px;">
+        <div class="f12" style="gap:3px;"><span class="tc2">Model:</span><b style="color:#00BFFF;" id="sys-mod">--</b></div>
+        <div class="f12" style="gap:3px;"><span class="tc2">OOS WR:</span><b id="sys-acc">--</b></div>
       </div>
     </div>
   </div>
 
-</main>
+</div>
 
 <!-- ═══ FOOTER ═══ -->
-<footer class="shrink-0 px-5 py-1.5 flex items-center justify-between text-[8px] text-[#4A5A7A] border-t border-[#1B2B4D]" style="background:#0A1325;">
+<footer>
   <span>Trading involves risk. Past performance is not indicative of future results.</span>
   <span>QUANTX AI &copy; 2026</span>
 </footer>
 
-<!-- ════════════════════════════════════════════════════════════
-     JAVASCRIPT
-     ════════════════════════════════════════════════════════════ -->
+<!-- ═══ JS ═══ -->
 <script>
 (function(){'use strict';
+const W=()=>new Date().toLocaleTimeString('en-US',{hour12:false});
+const $=i=>document.getElementById(i);
+const FP=(v)=>(v==null||isNaN(v)?'0.00000':Number(v).toFixed(5));
+const FD=(v)=>{if(v==null||isNaN(v))return'$0';const n=Number(v);return Math.abs(n)>=1000?`$${n.toFixed(0)}`:`$${n.toFixed(2)}`};
+let S={},L=[],la=null,lt=null,lp=-1;
+const M=100;
 
-const WS_URL=`ws://${location.host}/ws`;
-const API_STATE='/api/state';
-const RECONNECT_DELAY=3000;
-let state={},ws=null,reconnectTimer=null;
-let lastPrice=0,prevAction=null,prevTrend=null,prevPosCount=-1;
-let activityLog=[];
-const MAX_LOG=100;
-const $=id=>document.getElementById(id);
-const now=()=>new Date().toLocaleTimeString('en-US',{hour12:false});
-
-function fmtPrice(v){if(v==null||isNaN(v))return'0.00000';return Number(v).toFixed(5)}
-function fmtDollar(v){if(v==null||isNaN(v))return'$0';const n=Number(v);return Math.abs(n)>=1000?`$${n.toFixed(0)}`:`$${n.toFixed(2)}`}
-function fmtPct(v){if(v==null||isNaN(v))return'0.0%';return`${Number(v).toFixed(1)}%`}
-
-function detCat(m){const u=m.toUpperCase();
-  if(u.includes('DATA')||u.includes('UPDATE')||u.includes('PRICE')||u.includes('TICK'))return'DATA';
-  if(u.includes('ANALY')||u.includes('STRUCT')||u.includes('TREND')||u.includes('RSI')||u.includes('MACD')||u.includes('MOMENTUM')||u.includes('VOLUME'))return'ANALYSIS';
-  if(u.includes('RISK')||u.includes('SL')||u.includes('TP')||u.includes('DRAWDOWN')||u.includes('MARGIN'))return'RISK';
-  if(u.includes('BUY')||u.includes('SELL')||u.includes('HOLD')||u.includes('TRADE')||u.includes('SIGNAL')||u.includes('ENTRY'))return'SIGNAL';
-  if(u.includes('EXECUT')||u.includes('OPEN')||u.includes('CLOSE')||u.includes('ORDER')||u.includes('POSITION'))return'ACTION';
-  return'ANALYSIS';
+function DC(m){const u=m.toUpperCase();if(u.includes('DATA')||u.includes('PRICE')||u.includes('TICK'))return'DATA';if(u.includes('ANALY')||u.includes('TREND')||u.includes('RSI')||u.includes('MACD')||u.includes('MOMENTUM'))return'ANALYSIS';if(u.includes('RISK')||u.includes('SL')||u.includes('TP'))return'RISK';if(u.includes('BUY')||u.includes('SELL')||u.includes('HOLD')||u.includes('SIGNAL'))return'SIGNAL';if(u.includes('OPEN')||u.includes('CLOSE')||u.includes('POSITION'))return'ACTION';return'ANALYSIS'}
+function AL(m,h){const t=W(),c=DC(m);L.push({time:t,msg:m,cat:c,highlight:!!h});if(L.length>M)L.shift();RL()}
+function RL(){const c=$('log-c');if(!c)return;c.innerHTML=L.slice(-25).map(e=>`<div class="le"><span class="lt">${e.time}</span><span class="lc lc${e.cat.toLowerCase()}">${e.cat}</span><span class="lm${e.highlight?' lh':''}">${e.msg}</span></div>`).join('');c.scrollTop=c.scrollHeight}
+function SG(el,p,c){if(!el)return;const r=20,circ=2*Math.PI*r;el.setAttribute('stroke-dashoffset',circ-(circ*Math.min(100,Math.max(0,p))/100));el.setAttribute('stroke',c)}
+function SR(el,p){if(!el)return;const r=20,circ=2*Math.PI*r;el.setAttribute('stroke-dashoffset',circ-(circ*Math.min(100,Math.max(0,p))/100));el.setAttribute('stroke',p<=25?'#00FF88':p<=50?'#FFD700':p<=75?'#FF8C00':'#FF4D4D')}
+function AC(a){const u=(a||'').toUpperCase();return u==='BUY'?'#00FF88':u==='SELL'?'#FF4D4D':'#FFD700'}
+function IS(v,t){
+  if(t==='rsi'){if(v>70)return{s:'OVERBOUGHT',d:'dr'};if(v<30)return{s:'OVERSOLD',d:'dr'};if(v>60)return{s:'BULLISH',d:'dg'};if(v<40)return{s:'BEARISH',d:'dr'};return{s:'NEUTRAL',d:'dy'}}
+  if(t==='macd'){if(v>5e-4)return{s:'BULLISH',d:'dg'};if(v<-5e-4)return{s:'BEARISH',d:'dr'};return{s:'NEUTRAL',d:'dy'}}
+  if(t==='adx'){if(v>40)return{s:'STRONG',d:'dg'};if(v>25)return{s:'TREND',d:'dg'};if(v>20)return{s:'WEAK',d:'dy'};return{s:'NONE',d:'dr'}}
+  if(t==='vol'){if(v>5e-4)return{s:'HIGH',d:'do'};if(v>2e-4)return{s:'MED',d:'dy'};return{s:'LOW',d:'db'}}
+  if(t==='ema')return{s:v?'ABOVE':'BELOW',d:v?'dr':'dg'}
 }
 
-function addLog(msg,hl){const t=now(),cat=detCat(msg);activityLog.push({time:t,msg,cat,highlight:!!hl});if(activityLog.length>MAX_LOG)activityLog.shift();renderLog()}
-function renderLog(){const c=$('log-container');if(!c)return;c.innerHTML=activityLog.slice(-30).map(e=>`<div class="log-entry"><span class="log-time">${e.time}</span><span class="log-cat cat-${e.cat.toLowerCase()}">${e.cat}</span><span class="log-msg${e.highlight?' log-highlight':''}">${e.msg}</span></div>`).join('');c.scrollTop=c.scrollHeight}
-
-function setGauge(el,pct,color){if(!el)return;const r=33,circ=2*Math.PI*r;el.setAttribute('stroke-dashoffset',circ-(circ*Math.min(100,Math.max(0,pct))/100));el.setAttribute('stroke',color)}
-function setRisk(el,pct){if(!el)return;const r=31,circ=2*Math.PI*r;el.setAttribute('stroke-dashoffset',circ-(circ*Math.min(100,Math.max(0,pct))/100));el.setAttribute('stroke',pct<=25?'#00FF88':pct<=50?'#FFD700':pct<=75?'#FF8C00':'#FF4D4D')}
-
-function acColor(a){const u=(a||'').toUpperCase();if(u==='BUY')return'#00FF88';if(u==='SELL')return'#FF4D4D';return'#FFD700'}
-function indSig(v,type){
-  if(type==='rsi'){if(v>70)return{sig:'OVERBOUGHT',sts:'rd'};if(v<30)return{sig:'OVERSOLD',sts:'rd'};if(v>60)return{sig:'BULLISH',sts:'gr'};if(v<40)return{sig:'BEARISH',sts:'rd'};return{sig:'NEUTRAL',sts:'yl'}}
-  if(type==='macd'){if(v>5e-4)return{sig:'BULLISH',sts:'gr'};if(v<-5e-4)return{sig:'BEARISH',sts:'rd'};return{sig:'NEUTRAL',sts:'yl'}}
-  if(type==='adx'){if(v>40)return{sig:'STRONG',sts:'gr'};if(v>25)return{sig:'TRENDING',sts:'gr'};if(v>20)return{sig:'WEAK',sts:'yl'};return{sig:'NO TREND',sts:'rd'}}
-  if(type==='vol'){if(v>5e-4)return{sig:'HIGH',sts:'org'};if(v>2e-4)return{sig:'MEDIUM',sts:'yl'};return{sig:'LOW',sts:'bl'}}
-  if(type==='ema')return{sig:v?'ABOVE':'BELOW',sts:v?'rd':'gr'}
-}
-
-// ── RENDER ──
-function render(s){
-  if(!s||Object.keys(s).length===0)return;
-
-  // Header
-  $('h-symbol').textContent=s.symbol||'EURUSD';
-  const price=s.current_price||0;
-  const pe=$('h-price');pe.textContent=fmtPrice(price);
-  if(price>lastPrice)pe.style.color='#00FF88';else if(price<lastPrice)pe.style.color='#FF4D4D';
-  lastPrice=price;
-  const h=new Date().getHours();
-  let session='Asia';if(h>=7&&h<12)session='London';else if(h>=12&&h<16)session='Overlap';else if(h>=16||h<22)session='New York';
-  $('h-session').textContent=session;
-  $('h-model').textContent=s.model_version||'--';
-  $('h-time').textContent=now();
-
-  // CARD 1: AI SIGNAL
-  const action=s.current_action||'HOLD';
-  const se=$('sig-action');se.textContent=action;se.style.color=acColor(action);
-  const conf=(s.confidence||0)*100;
-  $('sig-trend').textContent=s.trend||'--';$('sig-trend').style.color=acColor(s.trend);
-  $('sig-regime').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
-  $('gauge-pct').textContent=Math.round(conf)+'%';
-  const gc=conf<40?'#FF4D4D':conf<60?'#FFD700':'#00FF88';
-  $('gauge-pct').style.color=gc;
-  setGauge($('gauge-circle'),conf,gc);
-  const re=$('sig-rec-badge');
-  if(s.no_trade){re.textContent=s.no_trade_reasons?.[0]||'WAITING';re.style.color='#FFD700';re.style.borderColor='rgba(255,215,0,.2)';re.style.background='rgba(255,215,0,.1)';}
-  else{re.textContent=action+' SIGNAL';re.style.color=action==='BUY'?'#00FF88':'#FF4D4D';re.style.borderColor=action==='BUY'?'rgba(0,255,136,.2)':'rgba(255,77,77,.2)';re.style.background=action==='BUY'?'rgba(0,255,136,.1)':'rgba(255,77,77,.1)';}
-
-  // CARD 2: AI ANALYSIS
-  $('ana-regime').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
-  const reasons=s.decision_reasons||s.no_trade_reasons||[];
-  $('ana-reasons').innerHTML=reasons.length>0?reasons.map(r=>`<li>• ${r}</li>`).join(''):'<li>• Waiting for analysis...</li>';
-  $('ana-decision').textContent=action;$('ana-decision').style.color=acColor(action);
-  $('ana-confidence').textContent=Math.round(conf)+'%';$('ana-confidence').style.color=gc;
-
-  // CARD 3: ACCOUNT
-  $('acct-balance').textContent=fmtDollar(s.balance);
-  $('acct-equity').textContent=fmtDollar(s.equity);
-  const fl=s.floating_profit||0;const fle=$('acct-floating');fle.textContent=fmtDollar(fl);fle.style.color=fl>=0?'#00FF88':'#FF4D4D';
-  $('acct-free').textContent=fmtDollar(s.free_margin);
-  const ml=s.margin_level||0;const mle=$('acct-margin-lvl');mle.textContent=ml>0?Number(ml).toFixed(0)+'%':'0%';mle.style.color=ml>1000?'#00FF88':ml>500?'#FFD700':'#FF4D4D';
-  $('acct-daily-pl').textContent=fmtDollar(fl);
-  const dd=(s.drawdown||0)*100;const dde=$('acct-dd');dde.textContent=dd.toFixed(1)+'%';dde.style.color=dd>10?'#FF4D4D':dd>5?'#FFD700':'#00FF88';
-  $('dd-bar').style.width=Math.min(100,dd)+'%';$('dd-bar').style.background=dd>10?'#FF4D4D':dd>5?'#FFD700':'#00FF88';
-
-  // CARD 4: INDICATORS
-  const ri=s.rsi;if(ri!=null){const is=indSig(ri,'rsi');$('ind-rsi').textContent=Number(ri).toFixed(1);$('ind-rsi').style.color=is.sts==='rd'?'#FF4D4D':is.sts==='gr'?'#00FF88':'#FFD700';$('ind-rsi-sig').textContent=is.sig;$('ind-rsi-sig').style.color=is.sts==='rd'?'#FF4D4D':is.sts==='gr'?'#00FF88':'#FFD700';$('ind-rsi-sts').innerHTML=`<span class="dot dot-${is.sts}"></span>`;}
-  const mc=s.macd;if(mc!=null){const is=indSig(mc,'macd');$('ind-macd').textContent=Number(mc).toFixed(5);$('ind-macd-sig').textContent=is.sig;$('ind-macd-sig').style.color=is.sts==='rd'?'#FF4D4D':is.sts==='gr'?'#00FF88':'#FFD700';$('ind-macd-sts').innerHTML=`<span class="dot dot-${is.sts}"></span>`;}
-  const ad=s.adx;if(ad!=null){const is=indSig(ad,'adx');$('ind-adx').textContent=Number(ad).toFixed(1);$('ind-adx-sig').textContent=is.sig;$('ind-adx-sig').style.color=is.sts==='rd'?'#FF4D4D':is.sts==='gr'?'#00FF88':'#FFD700';$('ind-adx-sts').innerHTML=`<span class="dot dot-${is.sts}"></span>`;}
-  const at=s.atr;if(at!=null){const is=indSig(at,'vol');$('ind-atr').textContent=Number(at).toFixed(5);$('ind-atr-sig').textContent=is.sig;$('ind-atr-sig').style.color=is.sts==='org'?'#FF8C00':is.sts==='yl'?'#FFD700':'#00BFFF';$('ind-atr-sts').innerHTML=`<span class="dot dot-${is.sts==='org'?'org':is.sts==='bl'?'bl':is.sts}"></span>`;}
-  const e50=s.ema_50;if(e50!=null){const a=e50>price;$('ind-ema50').textContent=Number(e50).toFixed(5);$('ind-ema50-sig').textContent=a?'ABOVE':'BELOW';$('ind-ema50-sig').style.color=a?'#FF4D4D':'#00FF88';$('ind-ema50-sts').innerHTML=`<span class="dot dot-${a?'rd':'gr'}"></span>`;}
-  const e200=s.ema_200;if(e200!=null){const a=e200>price;$('ind-ema200').textContent=Number(e200).toFixed(5);$('ind-ema200-sig').textContent=a?'ABOVE':'BELOW';$('ind-ema200-sig').style.color=a?'#FF4D4D':'#00FF88';$('ind-ema200-sts').innerHTML=`<span class="dot dot-${a?'rd':'gr'}"></span>`;}
-
-  // CARD 5: MARKET STRUCTURE
-  const trend=s.trend||'--';$('ms-trend').textContent=trend;$('ms-trend').style.color=acColor(trend);
+function R(s){
+  if(!s||!Object.keys(s).length)return;
+  const p=s.current_price||0;$('h-symbol').textContent=s.symbol||'EURUSD';const pe=$('h-price');pe.textContent=FP(p);
+  if(p>window._lp)pe.style.color='#00FF88';else if(p<window._lp)pe.style.color='#FF4D4D';window._lp=p;
+  const h=new Date().getHours();let ss='Asia';if(h>=7&&h<12)ss='London';else if(h>=12&&h<16)ss='Overlap';else if(h>=16||h<22)ss='NY';
+  $('h-session').textContent=ss;$('h-model').textContent=s.model_version||'--';$('h-time').textContent=W();
+  
+  const a=s.current_action||'HOLD';const se=$('sig-action');se.textContent=a;se.style.color=AC(a);
+  const c=(s.confidence||0)*100;$('sig-t').textContent=s.trend||'--';$('sig-t').style.color=AC(s.trend);
+  $('sig-r').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
+  $('gauge-p').textContent=Math.round(c)+'%';const gc=c<40?'#FF4D4D':c<60?'#FFD700':'#00FF88';$('gauge-p').style.color=gc;SG($('gauge-c'),c,gc);
+  const be=$('sig-b');
+  if(s.no_trade){be.textContent=s.no_trade_reasons?.[0]||'WAITING';be.style.color='#FFD700';be.style.borderColor='rgba(255,215,0,.15)';be.style.background='rgba(255,215,0,.08)';}
+  else{be.textContent=a+' SIGNAL';be.style.color=a==='BUY'?'#00FF88':'#FF4D4D';be.style.borderColor=a==='BUY'?'rgba(0,255,136,.15)':'rgba(255,77,77,.15)';be.style.background=a==='BUY'?'rgba(0,255,136,.08)':'rgba(255,77,77,.08)';}
+  
+  $('ana-r').textContent=s.regime?s.regime.replace(/_/g,' '):'--';
+  const rs=s.decision_reasons||s.no_trade_reasons||[];$('ana-reasons').innerHTML=rs.length?rs.slice(0,4).map(r=>`<li>• ${r}</li>`).join(''):'<li>Waiting...</li>';
+  $('ana-d').textContent=a;$('ana-d').style.color=AC(a);$('ana-c').textContent=Math.round(c)+'%';$('ana-c').style.color=gc;
+  
+  $('a-bal').textContent=FD(s.balance);$('a-eq').textContent=FD(s.equity);
+  const fl=s.floating_profit||0;const fe=$('a-fl');fe.textContent=FD(fl);fe.style.color=fl>=0?'#00FF88':'#FF4D4D';
+  $('a-free').textContent=FD(s.free_margin);
+  const ml=s.margin_level||0;const me=$('a-ml');me.textContent=ml>0?Number(ml).toFixed(0)+'%':'0%';me.style.color=ml>1000?'#00FF88':ml>500?'#FFD700':'#FF4D4D';
+  const dd=(s.drawdown||0)*100;const de=$('a-dd');de.textContent=dd.toFixed(1)+'%';de.style.color=dd>10?'#FF4D4D':dd>5?'#FFD700':'#00FF88';
+  
+  const ri=s.rsi;if(ri!=null){const is=IS(ri,'rsi');$('i-rsi').textContent=Number(ri).toFixed(1);$('i-rsi-s').textContent=is.s;$('i-rsi-s').style.color=is.d==='dr'?'#FF4D4D':is.d==='dg'?'#00FF88':'#FFD700';$('i-rsi-d').innerHTML=`<span class="dot d${is.d[0]}${is.d[1]}"></span>`}
+  const mc=s.macd;if(mc!=null){const is=IS(mc,'macd');$('i-macd').textContent=Number(mc).toFixed(5);$('i-macd-s').textContent=is.s;$('i-macd-s').style.color=is.d==='dr'?'#FF4D4D':is.d==='dg'?'#00FF88':'#FFD700';$('i-macd-d').innerHTML=`<span class="dot d${is.d[0]}${is.d[1]}"></span>`}
+  const ad=s.adx;if(ad!=null){const is=IS(ad,'adx');$('i-adx').textContent=Number(ad).toFixed(1);$('i-adx-s').textContent=is.s;$('i-adx-s').style.color=is.d==='dr'?'#FF4D4D':is.d==='dg'?'#00FF88':'#FFD700';$('i-adx-d').innerHTML=`<span class="dot d${is.d[0]}${is.d[1]}"></span>`}
+  const at=s.atr;if(at!=null){const is=IS(at,'vol');$('i-atr').textContent=Number(at).toFixed(5);$('i-atr-s').textContent=is.s;$('i-atr-s').style.color=is.d==='do'?'#FF8C00':is.d==='dy'?'#FFD700':'#00BFFF';$('i-atr-d').innerHTML=`<span class="dot d${is.d[0]}${is.d[1]}"></span>`}
+  const e50=s.ema_50;if(e50!=null){const a=e50>p;$('i-e50').textContent=Number(e50).toFixed(5);$('i-e50-s').textContent=a?'ABOVE':'BELOW';$('i-e50-s').style.color=a?'#FF4D4D':'#00FF88';$('i-e50-d').innerHTML=`<span class="dot d${a?'r':'g'}${a?'d':'g'}"></span>`}
+  const e200=s.ema_200;if(e200!=null){const a=e200>p;$('i-e200').textContent=Number(e200).toFixed(5);$('i-e200-s').textContent=a?'ABOVE':'BELOW';$('i-e200-s').style.color=a?'#FF4D4D':'#00FF88';$('i-e200-d').innerHTML=`<span class="dot d${a?'r':'g'}${a?'d':'g'}"></span>`}
+  
+  const t=s.trend||'--';$('ms-t').textContent=t;$('ms-t').style.color=AC(t);
   $('ms-bos').textContent=s.has_bos?'YES':'NO';$('ms-bos').style.color=s.has_bos?'#FF4D4D':'#4A5A7A';
-  $('ms-choch').textContent=s.has_choch?'YES':'NO';$('ms-choch').style.color=s.has_choch?'#FF4D4D':'#4A5A7A';
-  const ms=(s.market_structure||'').toUpperCase();
-  $('ms-hh').textContent=ms.includes('HH')?'YES':'NO';$('ms-hh').style.color=ms.includes('HH')?'#00FF88':'#4A5A7A';
-  $('ms-lh').textContent=ms.includes('LH')||ms.includes('LL')?'YES':'NO';$('ms-lh').style.color=ms.includes('LH')?'#FFD700':'#4A5A7A';
-  const strS=(s.trend_strength||0)*100;$('ms-strength').textContent=Math.round(strS)+'%';$('ms-strength').style.color=strS>50?'#00FF88':strS>25?'#FFD700':'#4A5A7A';
-  const sp=$('struct-poly');if(sp){let pts='8,38 20,15 32,28 44,12 56,24';if(ms.includes('HH')&&ms.includes('LL'))pts='8,38 20,12 32,30 44,8 56,26';else if(ms.includes('LH'))pts='8,22 20,12 32,26 44,18 56,34';sp.setAttribute('points',pts)}
-
-  // CARD 6: PERFORMANCE
-  $('perf-trades').textContent=s.total_trades||0;
-  const wr=s.win_rate||0;$('perf-wr').textContent=Number(wr).toFixed(1)+'%';$('perf-wr').style.color=wr>50?'#00FF88':wr>30?'#FFD700':'#FF4D4D';
-  const pf=s.profit_factor||0;$('perf-pf').textContent=Number(pf).toFixed(2);$('perf-pf').style.color=pf>1.5?'#00FF88':pf>1?'#FFD700':'#FF4D4D';
-  $('perf-today').textContent=fmtDollar(fl);$('perf-today').style.color=fl>=0?'#00FF88':'#FF4D4D';
-  const sigs=s.last_signals||[];const profs=sigs.map(t=>t.profit||0);$('perf-best').textContent=fmtDollar(profs.length>0?Math.max(...profs):0);$('perf-worst').textContent=fmtDollar(profs.length>0?Math.min(...profs):0);
-
-  // CARD 7: AI PREDICTION
-  const tfp=s.tf_predictions||{};
-  function rPred(tf,ve,be){const p=tfp[tf];if(p&&p.direction){const d=p.direction,pc=p.confidence||50;ve.textContent=d+' '+pc+'%';ve.style.color=d==='UP'?'#00FF88':d==='DOWN'?'#FF4D4D':'#FFD700';be.style.width=pc+'%';be.style.background=d==='UP'?'#00FF88':d==='DOWN'?'#FF4D4D':'#FFD700';}}
-  rPred('M15',$('pred-15m-val'),$('pred-15m-bar'));rPred('H1',$('pred-1h-val'),$('pred-1h-bar'));rPred('H4',$('pred-4h-val'),$('pred-4h-bar'));
-  const bCount=['M15','H1','H4'].filter(t=>(tfp[t]?.direction||'')==='DOWN').length;
-  const uCount=['M15','H1','H4'].filter(t=>(tfp[t]?.direction||'')==='UP').length;
-  let bias='SIDEWAYS';if(bCount>=2)bias='BEARISH';else if(uCount>=2)bias='BULLISH';
-  $('pred-bias').textContent=bias;$('pred-bias').style.color=bias==='BULLISH'?'#00FF88':bias==='BEARISH'?'#FF4D4D':'#FFD700';
-
-  // CARD 8: POSITION
+  $('ms-ch').textContent=s.has_choch?'YES':'NO';$('ms-ch').style.color=s.has_choch?'#FF4D4D':'#4A5A7A';
+  const mst=(s.market_structure||'').toUpperCase();$('ms-hh').textContent=mst.includes('HH')?'YES':'NO';$('ms-hh').style.color=mst.includes('HH')?'#00FF88':'#4A5A7A';
+  $('ms-lh').textContent=mst.includes('LH')||mst.includes('LL')?'YES':'NO';$('ms-lh').style.color=mst.includes('LH')?'#FFD700':'#4A5A7A';
+  const str=(s.trend_strength||0)*100;$('ms-str').textContent=Math.round(str)+'%';$('ms-str').style.color=str>50?'#00FF88':str>25?'#FFD700':'#4A5A7A';
+  const sp=$('ms-poly');if(sp){let pts='6,30 16,12 26,22 36,10 44,20';if(mst.includes('HH')&&mst.includes('LL'))pts='6,30 16,8 26,24 36,6 44,20';else if(mst.includes('LH'))pts='6,18 16,8 26,20 36,14 44,26';sp.setAttribute('points',pts)}
+  
+  $('p-tr').textContent=s.total_trades||0;
+  const wr=s.win_rate||0;$('p-wr').textContent=Number(wr).toFixed(1)+'%';$('p-wr').style.color=wr>50?'#00FF88':wr>30?'#FFD700':'#FF4D4D';
+  const pf=s.profit_factor||0;$('p-pf').textContent=Number(pf).toFixed(2);$('p-pf').style.color=pf>1.5?'#00FF88':pf>1?'#FFD700':'#FF4D4D';
+  $('p-today').textContent=FD(fl);$('p-today').style.color=fl>=0?'#00FF88':'#FF4D4D';
+  const sigs=s.last_signals||[],prs=sigs.map(t=>t.profit||0);$('p-best').textContent=FD(prs.length?Math.max(...prs):0);$('p-worst').textContent=FD(prs.length?Math.min(...prs):0);
+  
+  const tf=s.tf_predictions||{};
+  function RP(tf,ve,be){const p=tf[tf];if(p&&p.direction){const d=p.direction,pc=p.confidence||50;ve.textContent=d+' '+pc+'%';ve.style.color=d==='UP'?'#00FF88':d==='DOWN'?'#FF4D4D':'#FFD700';be.style.width=pc+'%';be.style.background=d==='UP'?'#00FF88':d==='DOWN'?'#FF4D4D':'#FFD700'}}
+  RP('M15',$('pr-15m'),$('pr-15m-b'));RP('H1',$('pr-1h'),$('pr-1h-b'));RP('H4',$('pr-4h'),$('pr-4h-b'));
+  const bc=['M15','H1','H4'].filter(t=>(tf[t]?.direction||'')==='DOWN').length;
+  const uc=['M15','H1','H4'].filter(t=>(tf[t]?.direction||'')==='UP').length;
+  let bias='SIDEWAYS';if(bc>=2)bias='BEARISH';else if(uc>=2)bias='BULLISH';
+  $('pr-bias').textContent=bias;$('pr-bias').style.color=bias==='BULLISH'?'#00FF88':bias==='BEARISH'?'#FF4D4D':'#FFD700';
+  
   const pd=s.open_positions_detail||[];
-  if(pd.length>0){$('pos-empty').classList.add('hidden');$('pos-active').classList.remove('hidden');const p=pd[0];$('pos-type').textContent=p.type||'--';$('pos-type').style.color=(p.type||'').toUpperCase()==='BUY'?'#00FF88':'#FF4D4D';$('pos-ticket').textContent=p.ticket||'--';$('pos-entry').textContent=fmtPrice(p.price_open);$('pos-current').textContent=fmtPrice(price);const pr=p.profit||0;$('pos-profit').textContent=fmtDollar(pr);$('pos-profit').style.color=pr>=0?'#00FF88':'#FF4D4D';const pp=Math.min(100,Math.max(0,(pr/(s.balance||1))*1000));$('pos-profit-bar').style.width=pp+'%';$('pos-profit-bar').style.background=pr>=0?'#00FF88':'#FF4D4D';}
-  else{$('pos-active').classList.add('hidden');$('pos-empty').classList.remove('hidden');}
-
-  // CARD 9: RISK
-  const rs=Math.min(100,Math.max(0,(1-(s.confidence||0))*100));$('risk-score').textContent=Math.round(rs);$('risk-score').style.color=rs<=25?'#00FF88':rs<=50?'#FFD700':rs<=75?'#FF8C00':'#FF4D4D';setRisk($('risk-gauge'),rs);
-  $('risk-level').textContent=rs<=25?'LOW':rs<=50?'MEDIUM':rs<=75?'HIGH':'CRITICAL';$('risk-level').style.color=rs<=25?'#00FF88':rs<=50?'#FFD700':rs<=75?'#FF8C00':'#FF4D4D';
-  $('risk-sl-tp').textContent='30 / 60';
-
-  // CARD 11: SYSTEM
-  $('sys-model').textContent=s.model_version||'--';
-  $('sys-accuracy').textContent=s.models_summary?.M5?.oos?.win_rate!=null?s.models_summary.M5.oos.win_rate+'%':'--';
-
-  // Activity log
-  const nt=s.trend||'';if(nt&&nt!==prevTrend){prevTrend=nt;addLog('Trend: '+nt,true)}
-  const na=s.current_action||'';if(na&&na!==prevAction){prevAction=na;addLog('Signal: '+na,true)}
-  const pc=s.open_positions||0;if(pc!==prevPosCount){if(pc>prevPosCount&&pc>0)addLog('Position opened: '+pc+' active',true);else if(prevPosCount>0&&pc===0)addLog('All positions closed',true);prevPosCount=pc}
+  if(pd.length>0){$('pos-e').style.display='none';$('pos-a').style.display='block';const po=pd[0];$('pos-typ').textContent=po.type||'--';$('pos-typ').style.color=(po.type||'').toUpperCase()==='BUY'?'#00FF88':'#FF4D4D';$('pos-tkt').textContent=po.ticket||'--';$('pos-ent').textContent=FP(po.price_open);$('pos-now').textContent=FP(s.current_price);const pr=po.profit||0;$('pos-profit').textContent=FD(pr);$('pos-profit').style.color=pr>=0?'#00FF88':'#FF4D4D';const pp=Math.min(100,Math.max(0,(pr/(s.balance||1))*1000));$('pos-pbar').style.width=pp+'%';$('pos-pbar').style.background=pr>=0?'#00FF88':'#FF4D4D';}
+  else{$('pos-a').style.display='none';$('pos-e').style.display='flex'}
+  
+  const rsk=Math.min(100,Math.max(0,(1-(s.confidence||0))*100));$('risk-sc').textContent=Math.round(rsk);$('risk-sc').style.color=rsk<=25?'#00FF88':rsk<=50?'#FFD700':rsk<=75?'#FF8C00':'#FF4D4D';SR($('risk-g'),rsk);
+  $('risk-lv').textContent=rsk<=25?'LOW':rsk<=50?'MED':rsk<=75?'HIGH':'CRIT';$('risk-lv').style.color=rsk<=25?'#00FF88':rsk<=50?'#FFD700':rsk<=75?'#FF8C00':'#FF4D4D';
+  
+  $('sys-mod').textContent=s.model_version||'--';$('sys-acc').textContent=s.models_summary?.M5?.oos?.win_rate!=null?s.models_summary.M5.oos.win_rate+'%':'--';
+  
+  const nt=s.trend||'';if(nt&&nt!==lt){lt=nt;AL('Trend: '+nt,true)}
+  const na=s.current_action||'';if(na&&na!==la){la=na;AL('Signal: '+na,true)}
+  const pc=s.open_positions||0;if(pc!==lp){if(pc>lp&&pc>0)AL('Position opened: '+pc,true);else if(lp>0&&pc===0)AL('All positions closed',true);lp=pc}
 }
 
-// ── FETCH + WS ──
-async function fetchState(){try{const r=await fetch(API_STATE);const d=await r.json();if(d&&Object.keys(d).length>0){state=d;render(d);addLog('Dashboard initialized');addLog('Market data connected');addLog('AI Engine running');}}catch(e){}}
-function connectWS(){if(ws){ws.close();ws=null}try{ws=new WebSocket(WS_URL)}catch(e){scheduleReconnect();return}
-  ws.onopen=()=>{addLog('WebSocket connected',true);if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}};
-  ws.onmessage=e=>{try{const d=JSON.parse(e.data);if(d&&Object.keys(d).length>0){state=d;render(d)}}catch(e){}};
-  ws.onclose=()=>{addLog('Connection lost, reconnecting...',true);ws=null;scheduleReconnect()};
-  ws.onerror=()=>{}
+async function FS(){try{const r=await fetch('/api/state');const d=await r.json();if(d&&Object.keys(d).length>0){S=d;R(d);AL('Dashboard ready');AL('AI Engine running');AL('Market connected');}}catch(e){}}
+function CW(){let w;try{w=new WebSocket(`ws://${location.host}/ws`)}catch(e){setTimeout(CW,3000);return}
+  w.onopen=()=>{AL('WebSocket connected',true)};
+  w.onmessage=e=>{try{const d=JSON.parse(e.data);if(d&&Object.keys(d).length>0){S=d;R(d)}}catch(e){}};
+  w.onclose=()=>{AL('Reconnecting...',true);setTimeout(CW,3000)};
+  w.onerror=()=>{}
 }
-function scheduleReconnect(){if(reconnectTimer)return;reconnectTimer=setTimeout(()=>{reconnectTimer=null;connectWS()},RECONNECT_DELAY)}
 
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{fetchState();connectWS()});
-else{fetchState();connectWS()}
-
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{FS();CW()});
+else{FS();CW()}
 })();
 </script>
 </body>
