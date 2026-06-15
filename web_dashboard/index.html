@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0">
 <title>AI FOREX BOT v2 — Live Dashboard</title>
-<!-- TradingView Lightweight Charts -->
-<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
 <style>
 /* ── Reset & Base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -80,48 +79,14 @@ body { display: flex; flex-direction: column; }
 .header-right { display: flex; align-items: center; gap: 16px; }
 .header-time { color: var(--text-secondary); font-size: 12px; }
 
-/* ── Main Grid ── */
+/* ── Main Grid (3 columns) ── */
 .main-grid {
   display: grid;
-  grid-template-columns: 1140px 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0;
   flex: 1;
   min-height: 0;
 }
-
-/* ── Chart Panel (Left) ── */
-.chart-panel {
-  display: flex; flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--bg-body);
-  position: relative;
-}
-.chart-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 16px;
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
-  font-size: 11px; color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.chart-timeframe-btns { display: flex; gap: 4px; }
-.chart-tf-btn {
-  padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px;
-  background: transparent; color: var(--text-secondary);
-  font-family: var(--font); font-size: 10px; cursor: pointer;
-}
-.chart-tf-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-.chart-tf-btn:hover { border-color: var(--text-secondary); }
-#chart-container { flex: 1; min-height: 0; }
-
-/* ── Right Panel ── */
-.right-panel {
-  display: flex; flex-direction: column;
-  background: var(--bg-body);
-  overflow-y: auto;
-  padding: 0;
-}
-.right-panel::-webkit-scrollbar { width: 3px; }
 
 /* ── Cards ── */
 .card {
@@ -276,10 +241,7 @@ body { display: flex; flex-direction: column; }
 }
 .loading { animation: pulse 1.5s ease-in-out infinite; }
 
-/* ── Responsive tweaks for OBS at 1920×1080 ── */
-@media (max-width: 1920px) {
-  .main-grid { grid-template-columns: 1120px 1fr; }
-}
+
 </style>
 </head>
 <body>
@@ -306,64 +268,33 @@ body { display: flex; flex-direction: column; }
   </div>
 </header>
 
-<!-- ═══ MAIN GRID ═══ -->
+<!-- ═══ MAIN GRID (3 columns) ═══ -->
 <div class="main-grid">
 
-  <!-- ── Chart Panel ── -->
-  <div class="chart-panel">
-    <div class="chart-header">
-      <span>EURUSD · M5 · Real-time</span>
-      <div class="chart-timeframe-btns">
-        <button class="chart-tf-btn active" data-tf="M5">M5</button>
-        <button class="chart-tf-btn" data-tf="M15">M15</button>
-        <button class="chart-tf-btn" data-tf="H1">H1</button>
-      </div>
+  <!-- COL 1: MARKET ANALYSIS + ML SIGNAL -->
+  <div class="card" style="border-right:1px solid var(--border);">
+    <div class="card-title">Market Analysis</div>
+    <div class="card-row">
+      <span class="label">Trend</span>
+      <span class="value" id="trend-display">
+        <span id="trend-direction">--</span>
+        <span id="trend-strength" style="font-size:11px;color:var(--text-secondary);margin-left:6px;"></span>
+      </span>
     </div>
-    <div id="chart-container"></div>
-  </div>
-
-  <!-- ── Right Panel ── -->
-  <div class="right-panel" id="right-panel">
-
-    <!-- ACCOUNT OVERVIEW -->
-    <div class="card">
-      <div class="card-title">Account Overview</div>
-      <div class="account-grid">
-        <div><div class="card-row"><span class="label">Balance</span><span class="value" id="card-balance">$0</span></div></div>
-        <div><div class="card-row"><span class="label">Equity</span><span class="value" id="card-equity">$0</span></div></div>
-        <div><div class="card-row"><span class="label">Free Margin</span><span class="value" id="card-free">$0</span></div></div>
-        <div><div class="card-row"><span class="label">Margin Level</span><span class="value" id="card-margin-level">0%</span></div></div>
-        <div><div class="card-row"><span class="label">Floating P/L</span><span class="value" id="card-floating">$0</span></div></div>
-        <div><div class="card-row"><span class="label">Drawdown</span><span class="value" id="card-dd">0.0%</span></div></div>
-      </div>
+    <div class="card-row"><span class="label">Trend Score</span><span class="value" id="trend-score">0%</span></div>
+    <div class="progress-bar"><div class="progress-fill progress-blue" id="trend-bar" style="width:0%"></div></div>
+    <div class="card-row" style="margin-top:4px;">
+      <span class="label">Regime</span>
+      <span class="value" id="regime-display" style="font-size:12px;">--</span>
+    </div>
+    <div class="card-row"><span class="label">Confidence</span><span class="value" id="confidence-display">0%</span></div>
+    <div class="progress-bar"><div class="progress-fill progress-green" id="confidence-bar" style="width:0%"></div></div>
+    <div class="card-row" style="margin-top:6px;">
+      <span class="label">Action</span>
+      <span class="value" id="action-display" style="font-size:16px;font-weight:700;">HOLD</span>
     </div>
 
-    <!-- MARKET ANALYSIS -->
-    <div class="card">
-      <div class="card-title">Market Analysis</div>
-      <div class="card-row">
-        <span class="label">Trend</span>
-        <span class="value" id="trend-display">
-          <span id="trend-direction">--</span>
-          <span id="trend-strength" style="font-size:11px;color:var(--text-secondary);margin-left:6px;"></span>
-        </span>
-      </div>
-      <div class="card-row"><span class="label">Trend Score</span><span class="value" id="trend-score">0%</span></div>
-      <div class="progress-bar"><div class="progress-fill progress-blue" id="trend-bar" style="width:0%"></div></div>
-      <div class="card-row" style="margin-top:4px;">
-        <span class="label">Regime</span>
-        <span class="value" id="regime-display" style="font-size:12px;">--</span>
-      </div>
-      <div class="card-row"><span class="label">Confidence</span><span class="value" id="confidence-display">0%</span></div>
-      <div class="progress-bar"><div class="progress-fill progress-green" id="confidence-bar" style="width:0%"></div></div>
-      <div class="card-row" style="margin-top:4px;">
-        <span class="label">Action</span>
-        <span class="value" id="action-display" style="font-size:14px;font-weight:700;">HOLD</span>
-      </div>
-    </div>
-
-    <!-- ML SIGNAL -->
-    <div class="card">
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
       <div class="card-title">ML Signal</div>
       <div class="card-row"><span class="label">Signal</span><span class="value" id="ml-signal-display">HOLD</span></div>
       <div class="ml-bars">
@@ -377,9 +308,21 @@ body { display: flex; flex-direction: column; }
         <div class="ml-bar-label">HOLD <span id="ml-hold-pct">0%</span></div>
       </div>
     </div>
+  </div>
 
-    <!-- INDICATORS -->
-    <div class="card">
+  <!-- COL 2: ACCOUNT + INDICATORS -->
+  <div class="card" style="border-right:1px solid var(--border);">
+    <div class="card-title">Account Overview</div>
+    <div class="account-grid">
+      <div><div class="card-row"><span class="label">Balance</span><span class="value" id="card-balance">$0</span></div></div>
+      <div><div class="card-row"><span class="label">Equity</span><span class="value" id="card-equity">$0</span></div></div>
+      <div><div class="card-row"><span class="label">Free Margin</span><span class="value" id="card-free">$0</span></div></div>
+      <div><div class="card-row"><span class="label">Margin Level</span><span class="value" id="card-margin-level">0%</span></div></div>
+      <div><div class="card-row"><span class="label">Floating P/L</span><span class="value" id="card-floating">$0</span></div></div>
+      <div><div class="card-row"><span class="label">Drawdown</span><span class="value" id="card-dd">0.0%</span></div></div>
+    </div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
       <div class="card-title">Indicators</div>
       <div class="account-grid">
         <div><div class="card-row"><span class="label">RSI</span><span class="value" id="rsi-display">--</span></div></div>
@@ -391,8 +334,7 @@ body { display: flex; flex-direction: column; }
       </div>
     </div>
 
-    <!-- MARKET STRUCTURE -->
-    <div class="card">
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
       <div class="card-title">Market Structure</div>
       <div class="account-grid">
         <div><div class="card-row"><span class="label">Structure</span><span class="value" id="structure-display">--</span></div></div>
@@ -401,20 +343,27 @@ body { display: flex; flex-direction: column; }
         <div><div class="card-row"><span class="label">Pattern</span><span class="value" id="pattern-display">--</span></div></div>
       </div>
     </div>
-
-    <!-- STRATEGY -->
-    <div class="card">
-      <div class="card-title">Strategy</div>
-      <div class="account-grid">
-        <div><div class="card-row"><span class="label">TF</span><span class="value" id="tf-display">M5</span></div></div>
-        <div><div class="card-row"><span class="label">Aggr</span><span class="value" id="aggr-display">--</span></div></div>
-        <div><div class="card-row"><span class="label">Trailing</span><span class="value" id="trailing-display">OFF</span></div></div>
-        <div><div class="card-row"><span class="label">Readiness</span><span class="value" id="readiness-display">0%</span></div></div>
-      </div>
-      <div class="progress-bar"><div class="progress-fill progress-gold" id="readiness-bar" style="width:0%"></div></div>
-    </div>
-
   </div>
+
+  <!-- COL 3: STRATEGY + TF SCORES -->
+  <div class="card">
+    <div class="card-title">Strategy</div>
+    <div class="account-grid">
+      <div><div class="card-row"><span class="label">TF</span><span class="value" id="tf-display">M5</span></div></div>
+      <div><div class="card-row"><span class="label">Aggr</span><span class="value" id="aggr-display">--</span></div></div>
+      <div><div class="card-row"><span class="label">Trailing</span><span class="value" id="trailing-display">OFF</span></div></div>
+      <div><div class="card-row"><span class="label">Readiness</span><span class="value" id="readiness-display">0%</span></div></div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill progress-gold" id="readiness-bar" style="width:0%"></div></div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+      <div class="card-title">TF Scores</div>
+      <div id="tf-scores-container">
+        <div class="no-data">No TF data</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ═══ BOTTOM BAR ═══ -->
@@ -462,101 +411,16 @@ body { display: flex; flex-direction: column; }
   // ── Constants ──
   const WS_URL = `ws://${location.host}/ws`;
   const API_STATE = '/api/state';
-  const API_CANDLES = (symbol) => `/api/candles/${symbol}`;
   const RECONNECT_DELAY = 3000;
-  const CHART_BARS = 80;
 
   // ── State ──
   let state = {};
-  let candles = [];
-  let chartSeries = null;
-  let chart = null;
   let reconnectTimer = null;
   let ws = null;
   let lastPrice = 0;
 
   // ── DOM Refs ──
   const $ = (id) => document.getElementById(id);
-  const $$ = (sel) => document.querySelectorAll(sel);
-
-  // ── Init Chart ──
-  function initChart() {
-    const container = $('chart-container');
-    if (!container) return;
-
-    chart = LightweightCharts.createChart(container, {
-      layout: {
-        background: { type: 'solid', color: '#0B0E14' },
-        textColor: '#787B86',
-      },
-      grid: {
-        vertLines: { color: '#1a1f2e' },
-        horzLines: { color: '#1a1f2e' },
-      },
-      crosshair: {
-        mode: LightweightCharts.CrosshairMode.Normal,
-        vertLine: { color: '#5D6FF7', width: 1, style: LightweightCharts.LineStyle.Dashed },
-        horzLine: { color: '#5D6FF7', width: 1, style: LightweightCharts.LineStyle.Dashed },
-      },
-      timeScale: {
-        borderColor: '#2a2e39',
-        timeVisible: true,
-        secondsVisible: false,
-        fixLeftEdge: true,
-        fixRightEdge: true,
-      },
-      rightPriceScale: {
-        borderColor: '#2a2e39',
-      },
-      handleScroll: false,
-      handleScale: false,
-    });
-
-    chartSeries = chart.addCandlestickSeries({
-      upColor: '#00FF88',
-      downColor: '#FF4444',
-      borderDownColor: '#FF4444',
-      borderUpColor: '#00FF88',
-      wickDownColor: '#FF4444',
-      wickUpColor: '#00FF88',
-      priceFormat: {
-        type: 'price',
-        precision: 5,
-        minMove: 0.00001,
-      },
-    });
-
-    // Resize observer
-    const ro = new ResizeObserver(() => {
-      chart.applyOptions({
-        width: container.clientWidth,
-        height: container.clientHeight,
-      });
-    });
-    ro.observe(container);
-
-    // Timeframe buttons
-    $$('.chart-tf-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        $$('.chart-tf-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-      });
-    });
-  }
-
-  // ── Update Chart ──
-  function updateChart(newCandles) {
-    if (!chartSeries || !newCandles || newCandles.length === 0) return;
-    candles = newCandles.slice(-CHART_BARS);
-    chartSeries.setData(candles);
-    chart.timeScale().fitContent();
-  }
-
-  function updateChartRealtime(tick) {
-    if (!chartSeries || !tick) return;
-    // tick: { time, open, high, low, close }
-    chartSeries.update(tick);
-  }
 
   // ── Format Helpers ──
   function fmtPrice(v) {
@@ -740,6 +604,19 @@ body { display: flex; flex-direction: column; }
     $('readiness-display').textContent = fmtPct(read);
     $('readiness-bar').style.width = `${Math.min(100, read)}%`;
 
+    // ── TF Scores ──
+    const tfContainer = $('tf-scores-container');
+    if (s.tf_scores && Object.keys(s.tf_scores).length > 0) {
+      const tfHtml = Object.entries(s.tf_scores).map(([tf, score]) => {
+        const pct = Math.min(100, Math.max(0, score));
+        const color = score >= 30 ? 'var(--green)' : score >= 15 ? 'var(--gold)' : 'var(--red)';
+        return `<div class="card-row"><span class="label">${tf}</span><span class="value" style="color:${color}">${Number(score).toFixed(1)}</span></div>`;
+      }).join('');
+      tfContainer.innerHTML = tfHtml;
+    } else {
+      tfContainer.innerHTML = '<div class="no-data">No TF data</div>';
+    }
+
     // ── Open Positions ──
     const posBody = $('positions-body');
     if (s.open_positions && s.open_positions > 0 && s.open_positions_detail) {
@@ -796,20 +673,6 @@ body { display: flex; flex-direction: column; }
     }
   }
 
-  // ── Fetch Candles ──
-  async function fetchCandles(symbol) {
-    try {
-      const resp = await fetch(API_CANDLES(symbol || 'EURUSD'));
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
-        updateChart(data);
-      }
-    } catch (e) {
-      console.warn('Fetch candles error:', e);
-    }
-  }
-
   // ── Fetch Initial State ──
   async function fetchInitialState() {
     try {
@@ -819,7 +682,6 @@ body { display: flex; flex-direction: column; }
       if (data && Object.keys(data).length > 0) {
         state = data;
         render(data);
-        if (data.symbol) fetchCandles(data.symbol);
       }
     } catch (e) {
       console.warn('Fetch state error:', e);
@@ -850,14 +712,6 @@ body { display: flex; flex-direction: column; }
         if (data && Object.keys(data).length > 0) {
           state = data;
           render(data);
-          // If candle info included, update real-time
-          if (data._candle_update) {
-            updateChartRealtime(data._candle_update);
-          }
-          // If symbol changed, reload candles
-          if (data.symbol && (!candles.length || candles[0]?.symbol !== data.symbol)) {
-            fetchCandles(data.symbol);
-          }
         }
       } catch (e) {
         // ignore parse errors
@@ -886,7 +740,6 @@ body { display: flex; flex-direction: column; }
 
   // ── Init ──
   function init() {
-    initChart();
     fetchInitialState();
     connectWS();
   }
