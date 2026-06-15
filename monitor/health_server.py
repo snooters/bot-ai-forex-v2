@@ -16,11 +16,30 @@ import json
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types and datetimes."""
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (datetime, np.datetime64)):
+            return obj.isoformat()
+        return super().default(obj)
+
 
 app = FastAPI(title="AI Forex Bot", version="2.0.0")
 
@@ -109,7 +128,8 @@ def metrics():
 
 @app.get("/api/state")
 def get_full_state():
-    return _latest_full_state
+    payload = json.dumps(_latest_full_state, cls=NumpyEncoder)
+    return Response(content=payload, media_type="application/json")
 
 
 @app.get("/api/candles/{symbol}")
@@ -132,7 +152,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 if current != last_state:
                     last_state = current
                     try:
-                        await websocket.send_json(current)
+                        payload = json.dumps(current, cls=NumpyEncoder)
+                        await websocket.send_text(payload)
                     except Exception:
                         break
             await asyncio.sleep(0.25)
