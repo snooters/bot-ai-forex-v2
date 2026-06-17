@@ -1,0 +1,38 @@
+{
+  "val_accuracy": 0.47572815533980584,
+  "oos_score": 0.47572815533980584,
+  "feature_importance": {
+    "ema20_slope": 0.05517558753490448,
+    "ema50_slope": 0.0623241625726223,
+    "ema200_slope": 0.06928549706935883,
+    "adx": 0.07500319182872772,
+    "rsi14": 0.06884802877902985,
+    "macd_line_minus_signal": 0.06888338178396225,
+    "volume_ratio": 0.05720994248986244,
+    "atr": 0.06443440169095993,
+    "range_pct": 0.06466270983219147,
+    "prev_3_dir": 0.0688762366771698,
+    "h1_trend_slope": 0.0709090530872345,
+    "m30_momentum": 0.06711839884519577,
+    "price_pos_vs_ema20": 0.0741908997297287,
+    "m30_close_vs_h4_ema20": 0.06967228651046753,
+    "h1_rsi": 0.06340610980987549
+  },
+  "features": [
+    "ema20_slope",
+    "ema50_slope",
+    "ema200_slope",
+    "adx",
+    "rsi14",
+    "macd_line_minus_signal",
+    "volume_ratio",
+    "atr",
+    "range_pct",
+    "prev_3_dir",
+    "h1_trend_slope",
+    "m30_momentum",
+    "price_pos_vs_ema20",
+    "m30_close_vs_h4_ema20",
+    "h1_rsi"
+  ]
+}

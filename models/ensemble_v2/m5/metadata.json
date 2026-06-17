@@ -1,0 +1,24 @@
+{
+  "val_accuracy": 0.6059,
+  "oos_score": 0.6059,
+  "feature_importance": {
+    "rsi_direction": 0.02811085514360332,
+    "price_vs_ma20": 0.15382164967114248,
+    "volume_spike": 0.09910761616936135,
+    "h1_trend": 0.0,
+    "consecutive_bars": 0.009315602432415493,
+    "atr": 0.5826236621814513,
+    "spread": 0.09879555518175319,
+    "body_wick_ratio": 0.02822505922027272
+  },
+  "features": [
+    "rsi_direction",
+    "price_vs_ma20",
+    "volume_spike",
+    "h1_trend",
+    "consecutive_bars",
+    "atr",
+    "spread",
+    "body_wick_ratio"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "val_accuracy": 0.5421179302045728,
+  "oos_score": 0.5421179302045728,
+  "feature_importance": {
+    "h4_trend": 89.0,
+    "ema5_20_cross": 5.0,
+    "rsi14": 707.0,
+    "stoch_k": 541.0,
+    "volume_spike": 698.0,
+    "atr": 801.0,
+    "m5_price_pos_12bar": 627.0,
+    "macd": 0.0,
+    "prev_bar_dir": 39.0,
+    "range_vs_atr": 588.0,
+    "session_asia": 46.0,
+    "session_london": 30.0,
+    "session_overlap": 30.0,
+    "adx": 759.0
+  },
+  "features": [
+    "h4_trend",
+    "ema5_20_cross",
+    "rsi14",
+    "stoch_k",
+    "volume_spike",
+    "atr",
+    "m5_price_pos_12bar",
+    "macd",
+    "prev_bar_dir",
+    "range_vs_atr",
+    "session_asia",
+    "session_london",
+    "session_overlap",
+    "adx"
+  ]
+}
