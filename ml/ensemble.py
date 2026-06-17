@@ -14,6 +14,7 @@ class VotingEnsemble:
         self.weights: Dict[str, float] = {}
         self._trained = False
         self.feature_cols: Optional[List[str]] = None
+        self.version: Optional[str] = None
 
     def register_model(self, name: str, model: object, weight: float = 1.0):
         self.models[name] = model
@@ -101,6 +102,103 @@ class VotingEnsemble:
         if not self.models:
             return False
         return all(m.is_trained for m in self.models.values())
+
+    def set_weights_from_val_accuracy(self, val_accuracies: Dict[str, float]):
+        """Set model weights proportional to validation accuracy.
+
+        Models with val_accuracy <= random baseline (0.33 for 3-class)
+        get minimal weight so they don't pollute the ensemble.
+        Linear normalization with a floor prevents any model from
+        being completely silenced while still rewarding better models.
+
+        Args:
+            val_accuracies: Dict mapping model name -> validation accuracy (0-1).
+                            Example: {'xgboost': 0.72, 'random_forest': 0.41, 'lightgbm': 0.56}
+        """
+        if not val_accuracies:
+            self.logger.info("No val_accuracies provided — keeping default weights")
+            return
+
+        n_models = len(self.models)
+        if n_models == 0:
+            return
+
+        # 1. Extract raw accuracies (ensure 0-1 range)
+        raw_accs = {}
+        for name in self.models:
+            raw = val_accuracies.get(name, 0.0)
+            if raw > 1.0:
+                raw = raw / 100.0
+            raw_accs[name] = raw
+
+        # 2. Subtract random baseline (1/3 for 3-class), floor at 0
+        adjusted = {}
+        for name, raw in raw_accs.items():
+            adj = max(0.0, raw - 0.33)
+            adjusted[name] = adj
+
+        values = np.array([adjusted[n] for n in self.models])
+        if values.sum() == 0:
+            # All models at or below random: fall back to uniform
+            for name in self.models:
+                self.weights[name] = 1.0 / n_models
+            self.logger.info("All models at/below random baseline — using uniform weights")
+            return
+
+        # 3. If no model is convincingly above baseline, use uniform
+        if values.max() < 0.10:
+            for name in self.models:
+                self.weights[name] = 1.0 / n_models
+            self.logger.info("All models within 10% of random baseline — using uniform weights")
+            return
+
+        # 4. Linear normalization: proportional to adjusted accuracy above baseline
+        # Use square root to compress the range slightly (prevent domination)
+        sqrt_vals = np.sqrt(values)
+        raw_weights = sqrt_vals / sqrt_vals.sum()
+
+        # 5. Apply minimum weight floor — no model gets less than 10% weight
+        min_weight = 0.10
+        if n_models > 1 and raw_weights.min() < min_weight:
+            clipped = np.maximum(raw_weights, min_weight)
+            raw_weights = clipped / clipped.sum()
+
+        for i, name in enumerate(self.models):
+            self.weights[name] = float(raw_weights[i])
+            self.logger.info(
+                f"Ensemble weight for {name}: {self.weights[name]:.3f} "
+                f"(val_acc={raw_accs[name]:.1%})"
+            )
+
+    def get_model_val_accuracies(self, performance_path: Optional[str] = None) -> Dict[str, float]:
+        """Extract per-model val_accuracy from a performance.json file.
+        
+        The performance.json stores accuracy per model:
+            accuracy.xgboost_val, accuracy.random_forest_val, accuracy.lightgbm_val
+        
+        Returns a dict like {'xgboost': 0.72, 'random_forest': 0.41, ...}
+        """
+        if performance_path:
+            try:
+                with open(performance_path) as f:
+                    import json
+                    perf = json.load(f)
+                acc = perf.get("accuracy", {})
+                result = {}
+                for name in self.models:
+                    val_key = f"{name}_val"
+                    if val_key in acc:
+                        result[name] = float(acc[val_key])
+                    # Fallback: try direct key (e.g. lstm has no lstm_val)
+                    elif name in acc:
+                        result[name] = float(acc[name])
+                if result:
+                    return result
+            except Exception as e:
+                self.logger.debug(f"Cannot read performance data: {e}")
+        
+        # Fallback: try reading from standard model version directory
+        return {}
 
     def get_num_models(self) -> int:
         return len(self.models)

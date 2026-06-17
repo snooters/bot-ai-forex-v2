@@ -97,8 +97,8 @@ class LightGBMModel:
             fit_kwargs["callbacks"] = [_lgb_callback]
         self.model.fit(_X_train, y_train, **fit_kwargs)
         self._trained = True
-        train_score = self.model.score(X_train, y_train)
-        val_score = self.model.score(X_val, y_val) if X_val is not None else None
+        train_score = self.model.score(_X_train, y_train)
+        val_score = self.model.score(_X_val, y_val) if _X_val is not None else None
         if hasattr(self.model, "feature_importances_"):
             self.feature_importance = {
                 f"feature_{i}": float(imp)

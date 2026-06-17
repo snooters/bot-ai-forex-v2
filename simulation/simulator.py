@@ -361,6 +361,7 @@ class Simulator:
                 "signal": decision.get("ml_signal", ""),
                 "confidence": decision.get("confidence", 0),
                 "market_score": decision.get("market_score", 0),
+                "model_version": decision.get("model_version", "unknown"),
                 "regime": str(regime_result.get("regime", "UNKNOWN")),
                 "trend": str(trend_result.get("trend", "")),
                 "volatility": str(trend_result.get("volatility", "")),

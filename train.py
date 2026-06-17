@@ -224,7 +224,7 @@ def train_m5_model(
     bt = args.buy_threshold if hasattr(args, 'buy_threshold') else config.training["buy_threshold"]
     st = args.sell_threshold if hasattr(args, 'sell_threshold') else config.training["sell_threshold"]
     oos_result = oos_val.validate(df, ensemble, trainer, "M5+CTX", oos_split=0.2,
-                                   buy_threshold=bt, sell_threshold=st)
+                                   buy_threshold=bt, sell_threshold=st, timeframe=PRIMARY_TF)
     new_score = model_manager._compute_oos_numeric_score(oos_result)
 
     # Compare with current best version — re-evaluasi old model pada data SAMA untuk fair comparison
@@ -236,7 +236,7 @@ def train_m5_model(
             if old_ensemble.get_num_models() > 0:
                 oos_val2 = OOSValidator()
                 old_oos = oos_val2.validate(df, old_ensemble, trainer, "M5+CTX", oos_split=0.2,
-                                            buy_threshold=bt, sell_threshold=st)
+                                            buy_threshold=bt, sell_threshold=st, timeframe=PRIMARY_TF)
                 old_score = model_manager._compute_oos_numeric_score(old_oos)
                 logger.info(
                     f"Re-evaluated {best_ver} on same data: "

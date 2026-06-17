@@ -88,6 +88,8 @@ class RiskManager:
         risk_amount = balance * risk_pct
         risk_pct_actual = min(risk_pct * vol_mult, config.risk["max_risk_pct"] * 2 * aggr_mult)
 
+        rr_ratio = tp_pips / max(sl_pips, 1)
+
         self.account_monitor.record_trade()
 
         result["allowed"] = True

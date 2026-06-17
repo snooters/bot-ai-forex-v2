@@ -56,7 +56,8 @@ class TestDecisionEngineMTFFilter:
         )
         assert not d["no_trade"]
 
-    def test_buy_blocks_when_only_2_agree(self, engine):
+    def test_buy_with_2_agree_does_not_block(self, engine):
+        # MTF is now BONUS, not blocker — 2/4 agree should still be allowed
         mtf = {"trend240": 1, "trend60": 1, "trend30": -1, "trend15": -1}
         d = engine.make_decision(
             symbol="EURUSD", df_entry=_df(),
@@ -65,8 +66,8 @@ class TestDecisionEngineMTFFilter:
             sr_info=_sr(), feature_summary=_feat(),
             multi_tf_trends=mtf,
         )
-        assert d["no_trade"]
-        assert any("MTF filter" in r for r in d.get("no_trade_reasons", []))
+        assert not d["no_trade"]
+        assert any("MTF note" in r for r in d.get("reasons", []))
 
     def test_sell_allows_when_3_of_4_agree(self, engine):
         engine.ml_predictor.get_buy_sell_hold.return_value = {
@@ -83,7 +84,8 @@ class TestDecisionEngineMTFFilter:
         )
         assert not d["no_trade"]
 
-    def test_sell_blocks_when_only_2_agree(self, engine):
+    def test_sell_with_2_agree_does_not_block(self, engine):
+        # MTF is now BONUS, not blocker — 2/4 agree should still be allowed
         engine.ml_predictor.get_buy_sell_hold.return_value = {
             "signal": "SELL", "confidence": 0.72,
             "buy_prob": 0.15, "sell_prob": 0.65, "hold_prob": 0.20,
@@ -96,8 +98,8 @@ class TestDecisionEngineMTFFilter:
             sr_info=_sr(), feature_summary=_feat(),
             multi_tf_trends=mtf,
         )
-        assert d["no_trade"]
-        assert any("MTF filter" in r for r in d.get("no_trade_reasons", []))
+        assert not d["no_trade"]
+        assert any("MTF note" in r for r in d.get("reasons", []))
 
     def test_mtf_neutral_not_blocked(self, engine):
         mtf = {"trend240": 0, "trend60": 0, "trend30": 0, "trend15": 0}

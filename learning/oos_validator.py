@@ -39,6 +39,7 @@ class OOSValidator:
         oos_split: float = 0.2,
         buy_threshold: float = 0.001,
         sell_threshold: float = 0.001,
+        timeframe: Optional[int] = None,
     ) -> Dict:
         if df.empty or len(df) < 400:
             return self._empty_result("insufficient data (<400 rows)")
@@ -94,7 +95,9 @@ class OOSValidator:
         )
 
         try:
-            X_train, y_train, _, _ = trainer.prepare_training_data(train_df, lookahead=LOOKAHEAD_5)
+            X_train, y_train, _, _ = trainer.prepare_training_data(
+                train_df, lookahead=LOOKAHEAD_5, timeframe=timeframe,
+            )
         except Exception as e:
             return self._empty_result(f"train data prep failed: {e}")
 
@@ -415,9 +418,10 @@ class OOSValidator:
         """Cap unrealistic OOS metrics to prevent overfitting illusion."""
         if result.get("success"):
             # Capped at realistic maximums for forex
+            # Higher caps allow model differentiation (all models hit 5.0 before)
             result["win_rate"] = min(result.get("win_rate", 0), 75.0)
-            result["profit_factor"] = min(result.get("profit_factor", 0), 5.0)
-            result["sharpe_ratio"] = min(result.get("sharpe_ratio", 0), 3.0)
+            result["profit_factor"] = min(result.get("profit_factor", 0), 50.0)
+            result["sharpe_ratio"] = min(result.get("sharpe_ratio", 0), 10.0)
             result["non_hold_accuracy"] = min(result.get("non_hold_accuracy", 0), 80.0)
             result["accuracy"] = min(result.get("accuracy", 0), 85.0)
         return result

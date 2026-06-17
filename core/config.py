@@ -92,6 +92,16 @@ class Config:
                 "enable_lstm": self._get_bool("ENABLE_LSTM", True),
                 "enable_voting_ensemble": self._get_bool("ENABLE_VOTING_ENSEMBLE", True),
             },
+            "ensemble": {
+                "enabled": self._get_bool("ENSEMBLE_MODE", False),
+                "h4_weight": self._get_float("ENSEMBLE_H4_WEIGHT", 0.50),
+                "h1_weight": self._get_float("ENSEMBLE_H1_WEIGHT", 0.35),
+                "m5_weight": self._get_float("ENSEMBLE_M5_WEIGHT", 0.15),
+                "min_confidence": self._get_float("ENSEMBLE_MIN_CONFIDENCE", 0.55),
+                "entertain_enabled": self._get_bool("ENSEMBLE_ENTERTAIN", True),
+                "entertain_max_per_day": self._get_int("ENSEMBLE_ENTERTAIN_MAX", 50),
+                "monthly_target_pct": self._get_float("ENSEMBLE_MONTHLY_TARGET", 10.0),
+            },
             "training": {
                 "confirm_training": self._get_str("CONFIRM_TRAINING", "yes"),
                 "historical_years": self._get_int("HISTORICAL_YEARS", 2),
@@ -277,6 +287,10 @@ class Config:
     @property
     def ml(self) -> dict:
         return self._config["ml"]
+
+    @property
+    def ensemble(self) -> dict:
+        return self._config.get("ensemble", {})
 
     @property
     def training(self) -> dict:

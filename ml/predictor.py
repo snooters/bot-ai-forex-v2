@@ -142,6 +142,14 @@ class MLPredictor:
                 cal.load(str(calib_path))
                 self._calibrators[tf] = cal
 
+    def get_model_version(self, timeframe: int = Timeframe.M15) -> str:
+        """Get model version string for a given timeframe."""
+        try:
+            ensemble = self._get_ensemble(timeframe)
+            return ensemble.version or "unknown"
+        except Exception:
+            return "unknown"
+
     def get_prediction_confidence(self, df: pd.DataFrame, timeframe: int = Timeframe.M15) -> float:
         signal = self.get_buy_sell_hold(df, timeframe)
         return signal.get("confidence", 0)

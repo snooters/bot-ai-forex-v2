@@ -10,10 +10,11 @@ def render_simulation_panel(sim_result: Optional[Dict[str, Any]]) -> str:
     lr = sim_result.get("learning", {})
     stats = sim_result.get("stats", {})
     skill = lr.get("skill", {})
+    sep = "=" * 44
     lines = []
-    lines.append("─" * 44)
-    lines.append(" SELF LEARNING ".center(42, "─"))
-    lines.append("─" * 44)
+    lines.append(sep)
+    lines.append(" SELF LEARNING ".center(42, "="))
+    lines.append(sep)
     lines.append(f" Simulation Trades:    {stats.get('total_trades', 0):>6}")
     lines.append(f" Win Rate:            {stats.get('win_rate', 0)*100:>6.1f}%")
     lines.append(f" Profit Factor:       {stats.get('profit_factor', 0):>6.2f}")
@@ -53,7 +54,7 @@ def render_simulation_panel(sim_result: Optional[Dict[str, Any]]) -> str:
     if blocked:
         lines.append(f" Blocked Regimes:     {', '.join(blocked):>12}")
 
-    lines.append("─" * 44)
+    lines.append("=" * 44)
     return "\n".join(lines)
 
 
@@ -62,7 +63,7 @@ def render_monte_carlo_panel(mc_result: Optional[Dict[str, Any]]) -> str:
         return ""
 
     lines = []
-    lines.append(" MONTE CARLO ".center(42, "─"))
+    lines.append(" MONTE CARLO ".center(42, "="))
     lines.append(f" Iterations:          {mc_result.get('iterations', 0):>8}")
     lines.append(f" Profit Probability:  {mc_result.get('profit_probability', 0)*100:>6.1f}%")
     lines.append(f" DD > 20% Prob:       {mc_result.get('dd_gt_20pct_probability', 0)*100:>6.1f}%")
@@ -70,7 +71,7 @@ def render_monte_carlo_panel(mc_result: Optional[Dict[str, Any]]) -> str:
     lines.append(f" Median Profit:       ${mc_result.get('median_profit', 0):>8.2f}")
     lines.append(f" Avg DD:              {mc_result.get('avg_drawdown_pct', 0)*100:>6.1f}%")
     lines.append(f" 95% CI:              ${mc_result.get('percentile_5', 0):>8.2f} to ${mc_result.get('percentile_95', 0):>8.2f}")
-    lines.append("─" * 44)
+    lines.append("=" * 44)
     return "\n".join(lines)
 
 
@@ -79,7 +80,7 @@ def render_walk_forward_panel(wf_result: Optional[Any]) -> str:
         return ""
 
     lines = []
-    lines.append(" WALK FORWARD ".center(42, "─"))
+    lines.append(" WALK FORWARD ".center(42, "="))
     lines.append(f" Symbol:              {wf_result.symbol:>12}")
     lines.append(f" Grade:               {wf_result.grade:>12}")
     lines.append(f" Windows:             {len(wf_result.windows):>8}")
@@ -88,7 +89,7 @@ def render_walk_forward_panel(wf_result: Optional[Any]) -> str:
     lines.append(f" OOS Decay (WR):      {wf_result.oos_decay_wr*100:>6.1f}%")
     lines.append(f" Total Train Trades:  {wf_result.total_trades_train:>8}")
     lines.append(f" Total Val Trades:    {wf_result.total_trades_val:>8}")
-    lines.append("─" * 44)
+    lines.append("=" * 44)
 
     for w in wf_result.windows[:5]:
         lines.append(f" {w['label']}: Train WR {w['train_win_rate']*100:.0f}% "
@@ -97,16 +98,16 @@ def render_walk_forward_panel(wf_result: Optional[Any]) -> str:
 
     if len(wf_result.windows) > 5:
         lines.append(f" ... and {len(wf_result.windows) - 5} more windows")
-    lines.append("─" * 44)
+    lines.append("=" * 44)
     return "\n".join(lines)
 
 
 def _empty_panel() -> str:
     lines = []
-    lines.append("─" * 44)
-    lines.append(" SELF LEARNING ".center(42, "─"))
-    lines.append("─" * 44)
+    lines.append("=" * 44)
+    lines.append(" SELF LEARNING ".center(42, "="))
+    lines.append("=" * 44)
     lines.append(" No simulation data available.".center(42))
     lines.append(" Run simulation first.".center(42))
-    lines.append("─" * 44)
+    lines.append("=" * 44)
     return "\n".join(lines)

@@ -152,6 +152,19 @@ class WeekendTrainer:
         if ensemble.get_num_models() == 0:
             return {"status": "no_models_trained"}
 
+        # ── Weight ensemble by val_accuracy ──
+        val_accs = {}
+        for name, result in model_results.items():
+            if isinstance(result, dict):
+                va = result.get("val_accuracy", 0)
+                if va > 0:
+                    val_accs[name] = va
+        if val_accs:
+            ensemble.set_weights_from_val_accuracy(val_accs)
+            self.logger.info(f"Weekend ensemble weights: {dict(ensemble.weights)}")
+        else:
+            self.logger.info("No val_accuracy for weekend ensemble — using uniform weights")
+
         candidate_version = self.model_manager.save_to_candidate(ensemble, timeframe)
 
         oos_result = self._validate_oos(ensemble, timeframe, X_val, y_val)
@@ -410,6 +423,7 @@ class WeekendTrainer:
                 oos_split=0.2,
                 buy_threshold=_bt,
                 sell_threshold=_st,
+                timeframe=timeframe,
             )
             return oos_results
         except Exception as e:

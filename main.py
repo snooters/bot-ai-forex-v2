@@ -72,6 +72,9 @@ from utils.training_progress import TrainingProgress
 from utils import sounds as sound_utils
 from utils.readiness_estimator import estimate_real_readiness
 
+# Ensemble v2 integration
+from ensemble.integration import EnsembleIntegration
+
 
 class ForexBot:
     def __init__(self):
@@ -102,6 +105,7 @@ class ForexBot:
         self.news_analyzer = NewsAnalyzer()
 
         self.decision_engine = None
+        self.ensemble_integration = None
         self.risk_manager = RiskManager()
         self.execution_engine = ExecutionEngine()
         self.entry_engine = None
@@ -266,23 +270,34 @@ class ForexBot:
                         version = self.model_manager.save_ensemble(
                             self.model_trainer.get_ensemble(), timeframe=tf
                         )
-                        ensemble = self.model_manager.load_ensemble(version)
-                        all_ensembles[tf] = ensemble
-                        xgb_acc = results.get("models", {}).get("xgboost", {}).get("train_accuracy", 0)
-                        xgb_val = results.get("models", {}).get("xgboost", {}).get("val_accuracy", 0)
-                        rf_acc = results.get("models", {}).get("random_forest", {}).get("train_accuracy", 0)
-                        rf_val = results.get("models", {}).get("random_forest", {}).get("val_accuracy", 0)
+
+                        # Save feature importance for this TF (used for pruning next retrain)
+                        self.model_trainer.save_feature_importance(
+                            self.model_trainer.get_ensemble(), features, symbol, tf, version
+                        )
+
+                        # Save performance data BEFORE loading so ensemble weights
+                        # can be computed from val_accuracy
+                        perf_acc = {}
+                        for m_name in ["xgboost", "random_forest", "lightgbm", "lstm"]:
+                            m_result = results.get("models", {}).get(m_name, {}) or {}
+                            if isinstance(m_result, dict):
+                                perf_acc[m_name] = m_result.get("train_accuracy", 0) or 0
+                                perf_acc[f"{m_name}_val"] = m_result.get("val_accuracy", 0) or 0
                         self.model_manager.save_performance(version, {
-                            "accuracy": {
-                                "xgboost": xgb_acc,
-                                "xgboost_val": xgb_val,
-                                "random_forest": rf_acc,
-                                "random_forest_val": rf_val,
-                            },
+                            "accuracy": perf_acc,
                             "samples": len(X),
                         })
+
+                        ensemble = self.model_manager.load_ensemble(version)
+                        all_ensembles[tf] = ensemble
+                        xgb_val = perf_acc.get("xgboost_val", 0)
+                        rf_val = perf_acc.get("random_forest_val", 0)
+                        lgb_val = perf_acc.get("lightgbm_val", 0)
                         self.logger.info(
-                            f"  {tf_label}: DONE — XGB:{xgb_acc:.1%}(val:{xgb_val:.1%}) RF:{rf_acc:.1%}(val:{rf_val:.1%}) samples={len(X)} | v{version}"
+                            f"  {tf_label}: DONE — XGB(val={xgb_val:.1%}) RF(val={rf_val:.1%}) "
+                            f"LGB(val={lgb_val:.1%}) samples={len(X)} | v{version} "
+                            f"weights={ {k: f'{v:.2f}' for k, v in ensemble.weights.items()} }"
                         )
                 except Exception as e:
                     self.logger.warning(f"  {tf_label}: FAILED — {e}")
@@ -297,6 +312,17 @@ class ForexBot:
             market_scorer=self.market_scorer,
             trade_memory=self.trade_memory,
         )
+        # Ensemble v2 integration (activated via ENSEMBLE_MODE=true)
+        if config.ensemble.get("enabled", False):
+            self.ensemble_integration = EnsembleIntegration()
+            if self.ensemble_integration.initialize():
+                self.logger.info("Ensemble v2 initialized: H4+H1+M5 models loaded")
+            else:
+                self.logger.warning("Ensemble v2: failed to load models, falling back to legacy")
+                self.ensemble_integration = None
+        else:
+            self.logger.debug("Ensemble v2 disabled (ENSEMBLE_MODE=false)")
+        
         self.exit_engine = ExitEngine(
             execution_engine=self.execution_engine,
             data_engine=self.data_engine,
@@ -561,7 +587,31 @@ class ForexBot:
 
             pair_skill_score = self.skill_scorer.get_pair_skills().get(symbol, 50)
 
-            decision = self.decision_engine.make_decision(
+            # ── Ensemble v2 mode ──
+            use_ensemble = (self.ensemble_integration is not None and 
+                           self.ensemble_integration.is_loaded and
+                           config.ensemble.get("enabled", False))
+            
+            if use_ensemble:
+                self.ensemble_integration.compute_all_features()
+                decision = self.ensemble_integration.get_decision()
+                decision["symbol"] = symbol
+                # Log ensemble decision
+                self.logger.info(
+                    f"[Ensemble] {symbol}: {decision['action']} "
+                    f"(conf={decision['confidence']:.0%}, "
+                    f"score={decision.get('raw_score', 0):.2f})"
+                )
+                if decision["action"] in ("BUY", "SELL"):
+                    decision["no_trade"] = False
+                    decision["market_score"] = int(decision["confidence"] * 100)
+                    # Add basic SL/TP
+                    atr_val = df_aligned_feat.get("atr", pd.Series([0.001])).iloc[-1]
+                    decision["stop_loss"] = price - atr_val * 1.5 if decision["action"] == "BUY" else price + atr_val * 1.5
+                    decision["take_profit"] = price + atr_val * 2.5 if decision["action"] == "BUY" else price - atr_val * 2.5
+                    decision["entry_price"] = price
+            else:
+                decision = self.decision_engine.make_decision(
                 symbol=symbol,
                 df_entry={entry_tf: df_aligned_feat},
                 trend_result=trend_result,
@@ -595,14 +645,26 @@ class ForexBot:
             }
 
             ml_sig = decision.get("ml_signal", {})
-            self.logger.debug(
-                f"ML [{symbol}] sig={ml_sig.get('signal','?')} "
-                f"buy={ml_sig.get('buy_prob',0):.0%} sell={ml_sig.get('sell_prob',0):.0%} "
-                f"hold={ml_sig.get('hold_prob',0):.0%} conf={ml_sig.get('confidence',0):.0%} | "
-                f"Final: {decision.get('action','?')} "
-                f"(score={decision.get('market_score',0)} "
-                f"conf={decision.get('confidence',0):.0%})"
-            )
+            if use_ensemble:
+                details = decision.get("details", {})
+                self.logger.info(
+                    f"[Ensemble] H4={details.get('h4',{}).get('direction','?')} "
+                    f"({details.get('h4',{}).get('confidence',0):.0%}) | "
+                    f"H1={details.get('h1',{}).get('signal','?')} "
+                    f"({details.get('h1',{}).get('confidence',0):.0%}) | "
+                    f"M5_pullback={details.get('m5',{}).get('pullback_predicted','?')} | "
+                    f"Final: {decision.get('action','?')} "
+                    f"(conf={decision.get('confidence',0):.0%})"
+                )
+            else:
+                self.logger.debug(
+                    f"ML [{symbol}] sig={ml_sig.get('signal','?')} "
+                    f"buy={ml_sig.get('buy_prob',0):.0%} sell={ml_sig.get('sell_prob',0):.0%} "
+                    f"hold={ml_sig.get('hold_prob',0):.0%} conf={ml_sig.get('confidence',0):.0%} | "
+                    f"Final: {decision.get('action','?')} "
+                    f"(score={decision.get('market_score',0)} "
+                    f"conf={decision.get('confidence',0):.0%})"
+                )
 
             is_trade_action = decision["action"] in (
                 TradeDirection.BUY.value, TradeDirection.SELL.value,
@@ -631,7 +693,8 @@ class ForexBot:
                         )
 
                         if trade_result:
-                            self.trade_logger.log_trade_open(trade_result)
+                            entry_indicators = self._extract_indicators_from_df(df_aligned_feat)
+                            self.trade_logger.log_trade_open(trade_result, indicators=entry_indicators)
                             sound_utils.entry()
                             await self.telegram.send_event(TelegramEvent.OPEN_POSITION, {
                                 **trade_result,
@@ -664,7 +727,9 @@ class ForexBot:
                             exit_reason=action["action"],
                         )
                         if closed_trade:
-                            self.trade_memory.record_from_trade_log(closed_trade)
+                            # Pass entry-time indicators snapshot to trade memory
+                            entry_indicators = closed_trade.get("entry_indicators", {})
+                            self.trade_memory.record_from_trade_log(closed_trade, indicators=entry_indicators)
                             await self.telegram.send_event(TelegramEvent.POSITION_CLOSED, {
                                 "symbol": closed_trade.get("symbol", symbol),
                                 "direction": closed_trade.get("direction", ""),
@@ -688,6 +753,23 @@ class ForexBot:
 
         except Exception as e:
             self.logger.error(f"Error processing {symbol}: {e}", exc_info=True)
+
+    def _extract_indicators_from_df(self, df) -> Dict:
+        """Extract key indicator values from dataframe for trade memory snapshot."""
+        from learning.trade_memory import INDICATOR_FIELDS
+        indicators = {}
+        if df is None or df.empty:
+            return indicators
+        last = df.iloc[-1]
+        for field in INDICATOR_FIELDS:
+            if field in df.columns:
+                val = last.get(field)
+                if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                    try:
+                        indicators[field] = float(val)
+                    except (ValueError, TypeError):
+                        indicators[field] = str(val)
+        return indicators
 
     def _check_emergency(self):
         emergency = self.risk_manager.check_emergency(self._account_info)
@@ -855,6 +937,10 @@ class ForexBot:
                     version = self.model_manager.save_ensemble(
                         self.model_trainer.get_ensemble(), timeframe=tf
                     )
+                    # Save feature importance for this TF (used for pruning next retrain)
+                    self.model_trainer.save_feature_importance(
+                        self.model_trainer.get_ensemble(), features, symbol, tf, version
+                    )
                     ensembles[tf] = self.model_manager.load_ensemble(version)
                     _elapsed = time.monotonic() - _step_start
                     _train_times.append(_elapsed)
@@ -896,6 +982,7 @@ class ForexBot:
                             oos_split=0.2,
                             buy_threshold=_bt,
                             sell_threshold=_st,
+                            timeframe=tf,
                         )
                         self.model_manager.save_oos_result(version, oos_result)
                         if oos_result.get("success"):
@@ -1047,7 +1134,7 @@ class ForexBot:
                         continue
                     self.logger.info(f"  {tf_label}: {len(df)} candles loaded — preparing features...")
 
-                    old_version = self.model_manager.get_latest_version(tf)
+                    old_version = self.model_manager.get_best_version(tf) or self.model_manager.get_latest_version(tf)
                     accepted = False
                     best_oos = None
                     best_version = None
@@ -1096,6 +1183,7 @@ class ForexBot:
                                 df=df, ensemble=ensemble, trainer=self.model_trainer,
                                 timeframe_label=tf_label, oos_split=0.2,
                                 buy_threshold=_bt, sell_threshold=_st,
+                                timeframe=tf,
                             )
                         except Exception as e:
                             oos_result = self.oos_validator._empty_result(f"OOS validation crashed: {e}")
@@ -1150,6 +1238,7 @@ class ForexBot:
                                                 trainer=self.model_trainer,
                                                 timeframe_label=tf_label, oos_split=0.2,
                                                 buy_threshold=_bt, sell_threshold=_st,
+                                                timeframe=tf,
                                             )
                                             old_oos = old_oos_result
                                             old_score = self.model_manager._compute_oos_numeric_score(old_oos_result)
@@ -1617,6 +1706,45 @@ class ForexBot:
             }
             for p in open_positions
         ]
+        
+        # Ensemble v2 stats for streaming overlay
+        if self.ensemble_integration is not None and config.ensemble.get("enabled", False):
+            ens_stats = self.ensemble_integration.get_stats()
+            state["ensemble_mode"] = True
+            state["ensemble_h4_acc"] = ens_stats.get("h4_acc", 0)
+            state["ensemble_h1_acc"] = ens_stats.get("h1_acc", 0)
+            state["ensemble_m5_acc"] = ens_stats.get("m5_acc", 0)
+            state["ensemble_daily_trades"] = ens_stats.get("daily_trades", 0)
+        else:
+            state["ensemble_mode"] = False
+        
+        # ── Dashboard streaming data (win rate, profit factor, monthly target) ──
+        closed_trades = self.trade_logger.get_closed_trades()
+        bot_trades = [t for t in closed_trades if t.get("exit_reason") != "MT5"]
+        if bot_trades:
+            bot_wins = sum(1 for t in bot_trades if t.get("profit", 0) > 0)
+            bot_wr = min(100, max(0, bot_wins / len(bot_trades) * 100))
+            state["win_rate"] = bot_wr
+            state["total_trades"] = len(bot_trades)
+            bot_gross_profit = sum(t.get("profit", 0) for t in bot_trades if t.get("profit", 0) > 0)
+            bot_gross_loss = abs(sum(t.get("profit", 0) for t in bot_trades if t.get("profit", 0) < 0))
+            state["profit_factor"] = round(bot_gross_profit / bot_gross_loss, 2) if bot_gross_loss > 0 else 0.0
+        else:
+            state["win_rate"] = 0
+            state["total_trades"] = 0
+            state["profit_factor"] = 0.0
+        
+        state["monthly_target_pct"] = config.ensemble.get("monthly_target_pct", 10)
+        
+        # Win streak
+        streak = 0
+        for t in reversed(bot_trades if bot_trades else []):
+            if t.get("profit", 0) > 0:
+                streak += 1
+            elif t.get("profit", 0) < 0:
+                break
+        state["win_streak"] = streak
+        
         update_full_state(state)
 
         # Cache M5 candles for chart (every 5th call to reduce MT5 load)
@@ -1648,23 +1776,7 @@ class ForexBot:
             self.logger.debug(f"Web dashboard candle cache: {exc}")
 
         if self._tiktok_mode:
-            closed_trades = self.trade_logger.get_closed_trades()
-            bot_trades = [t for t in closed_trades if t.get("exit_reason") != "MT5"]
-            streak = 0
-            for t in reversed(bot_trades):
-                if t.get("profit", 0) > 0:
-                    streak += 1
-                elif t.get("profit", 0) < 0:
-                    break
-            self.tiktok_dashboard.set_win_streak(streak)
-            if bot_trades:
-                bot_wins = sum(1 for t in bot_trades if t.get("profit", 0) > 0)
-                bot_wr = min(100, max(0, bot_wins / len(bot_trades) * 100))
-                state["win_rate"] = bot_wr
-                state["total_trades"] = len(bot_trades)
-            else:
-                state["win_rate"] = 0
-                state["total_trades"] = 0
+            self.tiktok_dashboard.set_win_streak(state.get("win_streak", 0))
             self.tiktok_dashboard.update(state)
 
     async def shutdown(self, reason: str = "User request"):
@@ -2037,6 +2149,11 @@ async def cmd_simulate(bot: ForexBot, args: argparse.Namespace):
     bot.logger.info(f"SELF-LEARN SIMULATION: {symbol} ({days} days)")
     bot.logger.info("=" * 50)
 
+    # Enable simulation mode for relaxed filters
+    if bot.decision_engine is not None:
+        bot.decision_engine.set_simulation_mode(True)
+        bot.logger.info("DecisionEngine set to SIMULATION MODE")
+
     sim = Simulator(
         symbol=symbol,
         from_date=start_date,
@@ -2139,6 +2256,10 @@ async def cmd_self_learn(bot: ForexBot, args: argparse.Namespace):
         sim_trades = sim_result.get("trades", [])
     else:
         bot.logger.info("Phase 1/3: Running simulation...")
+        # Enable simulation mode for relaxed filters
+        if bot.decision_engine is not None:
+            bot.decision_engine.set_simulation_mode(True)
+            bot.logger.info("DecisionEngine set to SIMULATION MODE")
         sim = Simulator(
             symbol=symbol,
             from_date=start_date,
@@ -2211,6 +2332,10 @@ async def cmd_self_learn(bot: ForexBot, args: argparse.Namespace):
         if bot.model_trainer.get_ensemble().get_num_models() > 0:
             version = bot.model_manager.save_ensemble(
                 bot.model_trainer.get_ensemble(), timeframe=tf
+            )
+            # Save feature importance for this TF (used for pruning next retrain)
+            bot.model_trainer.save_feature_importance(
+                bot.model_trainer.get_ensemble(), features, symbol, tf, version
             )
             bot.logger.info(f"  {tf_label}: model saved as v{version}")
 

@@ -10,7 +10,14 @@ from rich.logging import RichHandler
 
 from core.constants import LOG_DIR
 
-_rich_console = Console()
+# Fix Windows console encoding for Rich (prevents UnicodeEncodeError with →, ░, etc.)
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+_rich_console = Console(force_terminal=True, color_system="auto", safe_box=True)
 
 
 class BotLogger:

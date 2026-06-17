@@ -30,7 +30,7 @@ class TradeLogger:
                 self.logger.warning(f"Failed to load trade history: {e}")
                 self._trades = []
 
-    def log_trade_open(self, trade: Dict):
+    def log_trade_open(self, trade: Dict, indicators: Optional[Dict] = None):
         trade_record = {
             "ticket": trade.get("ticket", 0),
             "symbol": trade.get("symbol", ""),
@@ -54,6 +54,7 @@ class TradeLogger:
                 "regime": trade.get("decision", {}).get("regime", ""),
                 "volatility": trade.get("decision", {}).get("volatility", ""),
             },
+            "entry_indicators": indicators or {},
         }
         self._trades.append(trade_record)
         self._save()
@@ -90,7 +91,10 @@ class TradeLogger:
                     f"Trade closed: {trade['direction']} {trade['symbol']} "
                     f"profit=${trade['profit']:.2f} pips={pips:.1f} reason={exit_reason}"
                 )
-                return trade
+                # Include entry indicators snapshot in returned dict
+                result_trade = dict(trade)
+                result_trade["entry_indicators"] = trade.get("entry_indicators", {})
+                return result_trade
 
         self.logger.warning(f"Trade {ticket} not found or already closed")
         return None

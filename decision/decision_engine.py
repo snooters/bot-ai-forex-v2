@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Dict, Optional, Tuple
 
 from core.config import config
@@ -18,6 +19,7 @@ class DecisionEngine:
         ml_predictor: MLPredictor,
         market_scorer: MarketScorer,
         trade_memory: Optional[TradeMemory] = None,
+        simulation_mode: bool = False,
     ):
         self.logger = get_logger("decision_engine")
         self.ml_predictor = ml_predictor
@@ -27,6 +29,16 @@ class DecisionEngine:
         self.no_trade_engine = NoTradeEngine()
         self._last_decision: Optional[Dict] = None
         self._regime_classifier = None
+        self._last_trade_direction: Optional[str] = None
+        self._last_trade_time: Optional[datetime] = None
+        self.simulation_mode = simulation_mode
+        if simulation_mode:
+            self.logger.info("DecisionEngine in SIMULATION MODE (relaxed filters)")
+
+    def set_simulation_mode(self, enabled: bool = True):
+        """Enable or disable simulation mode (relaxed trading filters)."""
+        self.simulation_mode = enabled
+        self.logger.info(f"DecisionEngine simulation_mode={enabled}")
 
     def _init_regime_classifier(self):
         if self._regime_classifier is not None:
@@ -87,6 +99,7 @@ class DecisionEngine:
             "position_size": 0,
             "timeframe": entry_tf,
             "reversal_force_close": False,
+            "model_version": self.ml_predictor.get_model_version(timeframe=entry_tf) if hasattr(self, 'ml_predictor') and self.ml_predictor else "unknown",
         }
 
         # ── Check trend reversal first ──
@@ -157,7 +170,7 @@ class DecisionEngine:
             sell_prob = ml_signal.get("sell_prob", 0)
             hold_prob = ml_signal.get("hold_prob", 0)
 
-            if no_trade_severity >= NoTradeEngine.CRITICAL:
+            if no_trade_severity >= NoTradeEngine.CRITICAL and not self.simulation_mode:
                 decision["no_trade"] = True
                 decision["no_trade_reasons"] = self.no_trade_engine.reasons
                 decision["action"] = TradeDirection.HOLD.value
@@ -172,17 +185,23 @@ class DecisionEngine:
                 timeframe=Timeframe.LABELS.get(entry_tf, "M15"),
             )
             if memory_check.get("block"):
-                decision["no_trade"] = True
-                decision["no_trade_reasons"] = [memory_check["reason"]]
-                decision["action"] = TradeDirection.HOLD.value
-                decision["reasons"].append(f"Memory block: {memory_check['reason']}")
-                self._last_decision = decision
-                return decision
+                if not self.simulation_mode:
+                    decision["no_trade"] = True
+                    decision["no_trade_reasons"] = [memory_check["reason"]]
+                    decision["action"] = TradeDirection.HOLD.value
+                    decision["reasons"].append(f"Memory block: {memory_check['reason']}")
+                    self._last_decision = decision
+                    return decision
+                else:
+                    decision["reasons"].append(f"Memory block (simulation override): {memory_check['reason']}")
 
             reduce_size = memory_check.get("reduce_size", False)
 
             dynamic_min = config.get_dynamic_min_confidence(balance)
             min_conf = max(0.50, dynamic_min)
+            # In simulation mode, use much lower threshold to generate more trades
+            if self.simulation_mode:
+                min_conf = 0.20
 
             if confidence >= min_conf and confidence < 0.70:
                 trade_type = "WEAK_SIGNAL"
@@ -224,17 +243,8 @@ class DecisionEngine:
                 counter_trend_min_conf = config.ai_filter.get("counter_trade_min_confidence", 0.60)
 
                 if combined_buy > combined_sell:
-                    # ── Counter-trade filter: BUY when M5 trend is bearish (non-STRONG) ──
-                    # STRONG_BEARISH skipped here — handled by trend override later
-                    if trend_dir in ("BEARISH", "WEAK_BEARISH") and confidence < counter_trend_min_conf:
-                        decision["action"] = TradeDirection.HOLD.value
-                        decision["no_trade"] = True
-                        decision["no_trade_reasons"].append(
-                            f"Counter-trade BUY blocked: trend={trend_dir}, conf={confidence:.0%} < {counter_trend_min_conf:.0%}"
-                        )
-                        decision["reasons"].append(f"Counter-trade BUY needs ≥{counter_trend_min_conf:.0%} conf (got {confidence:.0%})")
-                    elif self._validate_entry(direction="BUY", confidence=confidence,
-                                             trend_result=trend_result, sr_info=sr_info, df=df):
+                    if self._validate_entry(direction="BUY", confidence=confidence,
+                                            trend_result=trend_result, sr_info=sr_info, df=df):
                         decision["action"] = TradeDirection.BUY.value
                         decision["no_trade"] = False
                         label = "STRONG" if confidence >= 0.70 else "WEAK"
@@ -250,17 +260,8 @@ class DecisionEngine:
                             decision["reasons"].append(f"BUY validation failed, weak {direction_bias} bias")
 
                 elif combined_sell > combined_buy:
-                    # ── Counter-trade filter: SELL when M5 trend is bullish (non-STRONG) ──
-                    # STRONG_BULLISH skipped here — handled by trend override later
-                    if trend_dir in ("BULLISH", "WEAK_BULLISH") and confidence < counter_trend_min_conf:
-                        decision["action"] = TradeDirection.HOLD.value
-                        decision["no_trade"] = True
-                        decision["no_trade_reasons"].append(
-                            f"Counter-trade SELL blocked: trend={trend_dir}, conf={confidence:.0%} < {counter_trend_min_conf:.0%}"
-                        )
-                        decision["reasons"].append(f"Counter-trade SELL needs ≥{counter_trend_min_conf:.0%} conf (got {confidence:.0%})")
-                    elif self._validate_entry(direction="SELL", confidence=confidence,
-                                             trend_result=trend_result, sr_info=sr_info, df=df):
+                    if self._validate_entry(direction="SELL", confidence=confidence,
+                                            trend_result=trend_result, sr_info=sr_info, df=df):
                         decision["action"] = TradeDirection.SELL.value
                         decision["no_trade"] = False
                         label = "STRONG" if confidence >= 0.70 else "WEAK"
@@ -307,52 +308,65 @@ class DecisionEngine:
                                 f"Trend override suppressed: ML buy_prob={ml_buy_prob:.2f}"
                             )
 
-            # ── RSI + MACD safety override ──
-            if not decision["no_trade"]:
+            # ── RSI + MACD safety override (dynamic thresholds by trend) ──
+            # In simulation mode, skip RSI/MACD safety overrides
+            if not decision["no_trade"] and not self.simulation_mode:
                 ind = feature_summary.get("indicators", {})
                 rsi_val = ind.get("rsi", 50)
                 macd_val = ind.get("macd", 0)
                 macd_sig = ind.get("macd_signal", 0)
                 current_action = decision.get("action", TradeDirection.HOLD.value)
 
-                # Overbought: RSI > 70 → no BUY
-                if rsi_val > 70 and current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
+                # Dynamic RSI thresholds based on trend direction
+                # In strong trends, RSI can stay extended for long periods
+                if trend_dir in ("STRONG_BULLISH", "BULLISH"):
+                    rsi_overbought = 85  # Tolerate higher RSI in uptrend
+                    rsi_oversold = 20
+                elif trend_dir in ("STRONG_BEARISH", "BEARISH"):
+                    rsi_overbought = 65
+                    rsi_oversold = 15  # Tolerate lower RSI in downtrend
+                else:
+                    rsi_overbought = 70  # Normal thresholds for sideways
+                    rsi_oversold = 30
+
+                # Overbought: RSI > threshold → no BUY
+                if rsi_val > rsi_overbought and current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
                     decision["action"] = TradeDirection.HOLD.value
                     decision["no_trade"] = True
                     decision["no_trade_reasons"].append(
-                        f"Safety: RSI={rsi_val:.1f} > 70 overbought, no BUY"
+                        f"Safety: RSI={rsi_val:.1f} > {rsi_overbought} overbought (trend={trend_dir}), no BUY"
                     )
-                    decision["reasons"].append("RSI overbought safety override")
-                # Oversold: RSI < 30 → no SELL
-                elif rsi_val < 30 and current_action in (TradeDirection.SELL.value, "WEAK_SELL"):
+                    decision["reasons"].append(f"RSI overbought safety override (threshold={rsi_overbought})")
+                # Oversold: RSI < threshold → no SELL
+                elif rsi_val < rsi_oversold and current_action in (TradeDirection.SELL.value, "WEAK_SELL"):
                     decision["action"] = TradeDirection.HOLD.value
                     decision["no_trade"] = True
                     decision["no_trade_reasons"].append(
-                        f"Safety: RSI={rsi_val:.1f} < 30 oversold, no SELL"
+                        f"Safety: RSI={rsi_val:.1f} < {rsi_oversold} oversold (trend={trend_dir}), no SELL"
                     )
-                    decision["reasons"].append("RSI oversold safety override")
-                # MACD-confirmed extreme: keep existing combined checks
-                elif rsi_val < 30 and macd_val < macd_sig:
+                    decision["reasons"].append(f"RSI oversold safety override (threshold={rsi_oversold})")
+                # MACD-confirmed extreme: use dynamic thresholds too
+                elif rsi_val < rsi_oversold and macd_val < macd_sig:
                     if current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
                         decision["action"] = TradeDirection.HOLD.value
                         decision["no_trade"] = True
                         decision["no_trade_reasons"].append(
-                            f"Safety: RSI={rsi_val:.1f} < 30 + MACD bearish, no BUY"
+                            f"Safety: RSI={rsi_val:.1f} < {rsi_oversold} + MACD bearish, no BUY"
                         )
-                        decision["reasons"].append("RSI+MACD safety override")
-                elif rsi_val > 70 and macd_val > macd_sig:
+                        decision["reasons"].append(f"RSI+MACD safety override (oversold threshold={rsi_oversold})")
+                elif rsi_val > rsi_overbought and macd_val > macd_sig:
                     if current_action in (TradeDirection.SELL.value, "WEAK_SELL"):
                         decision["action"] = TradeDirection.HOLD.value
                         decision["no_trade"] = True
                         decision["no_trade_reasons"].append(
-                            f"Safety: RSI={rsi_val:.1f} > 70 + MACD bullish, no SELL"
+                            f"Safety: RSI={rsi_val:.1f} > {rsi_overbought} + MACD bullish, no SELL"
                         )
-                        decision["reasons"].append("RSI+MACD safety override")
+                        decision["reasons"].append(f"RSI+MACD safety override (overbought threshold={rsi_overbought})")
 
-            # ── Multi-TF trend alignment filter ──
+            # ── Multi-TF trend alignment BONUS ──
             # H4, H1, M30, M15 = context TFs
-            # M5  = Entry (primary)
-            # Require >= 3 of 4 context TFs to agree with signal direction
+            # This is a BONUS signal, not a blocker.
+            # If TFs agree → boost confidence. If they disagree → just note it.
             if multi_tf_trends and not decision["no_trade"]:
                 h4 = multi_tf_trends.get("trend240", 0)
                 h1 = multi_tf_trends.get("trend60", 0)
@@ -365,36 +379,61 @@ class DecisionEngine:
                 if current_action in (TradeDirection.BUY.value, "WEAK_BUY"):
                     agree = sum(1 for _, v in tf_values if v > 0)
                     disagree = sum(1 for _, v in tf_values if v < 0)
-                    if agree < 3 and disagree >= 2:
-                        decision["action"] = TradeDirection.HOLD.value
-                        decision["no_trade"] = True
-                        detail = " ".join(f"{k}={v:+d}" for k, v in tf_values)
-                        decision["no_trade_reasons"].append(
-                            f"MTF filter: BUY blocked (agree={agree}/4, disagree={disagree})"
-                        )
-                        decision["reasons"].append(f"MTF filter: BUY->HOLD ({detail})")
-                    elif agree < 3:
-                        decision["reasons"].append(
-                            f"MTF note: only {agree}/4 TFs bullish"
-                        )
+                    if agree >= 3:
+                        decision["reasons"].append(f"MTF bonus: {agree}/4 TFs bullish")
+                        decision["confidence"] = min(decision["confidence"] + 0.05, 1.0)
+                    elif disagree >= 3:
+                        decision["reasons"].append(f"MTF note: {disagree}/4 TFs bearish (reducing confidence)")
+                        decision["confidence"] = max(decision["confidence"] - 0.05, 0.0)
+                    else:
+                        decision["reasons"].append(f"MTF note: {agree} bullish / {disagree} bearish")
 
                 elif current_action in (TradeDirection.SELL.value, "WEAK_SELL"):
                     agree = sum(1 for _, v in tf_values if v < 0)
                     disagree = sum(1 for _, v in tf_values if v > 0)
-                    if agree < 3 and disagree >= 2:
-                        decision["action"] = TradeDirection.HOLD.value
-                        decision["no_trade"] = True
-                        detail = " ".join(f"{k}={v:+d}" for k, v in tf_values)
-                        decision["no_trade_reasons"].append(
-                            f"MTF filter: SELL blocked (agree={agree}/4, disagree={disagree})"
-                        )
-                        decision["reasons"].append(f"MTF filter: SELL->HOLD ({detail})")
-                    elif agree < 3:
-                        decision["reasons"].append(
-                            f"MTF note: only {agree}/4 TFs bearish"
-                        )
+                    if agree >= 3:
+                        decision["reasons"].append(f"MTF bonus: {agree}/4 TFs bearish")
+                        decision["confidence"] = min(decision["confidence"] + 0.05, 1.0)
+                    elif disagree >= 3:
+                        decision["reasons"].append(f"MTF note: {disagree}/4 TFs bullish (reducing confidence)")
+                        decision["confidence"] = max(decision["confidence"] - 0.05, 0.0)
+                    else:
+                        decision["reasons"].append(f"MTF note: {agree} bearish / {disagree} bullish")
 
+            # ── Anti-whipsaw: cegah flip-flop ──
+            # Skip in simulation mode to allow more trades for learning
+            if not decision["no_trade"] and decision.get("action") in (TradeDirection.BUY.value, TradeDirection.SELL.value) and not self.simulation_mode:
+                new_dir = decision["action"]
+                opposite_dir = TradeDirection.SELL.value if new_dir == TradeDirection.BUY.value else TradeDirection.BUY.value
 
+                # Cek posisi terbuka
+                if positions:
+                    for pos in positions:
+                        pos_dir = pos.get("type", "")
+                        if pos_dir == opposite_dir:
+                            decision["action"] = TradeDirection.HOLD.value
+                            decision["no_trade"] = True
+                            decision["no_trade_reasons"].append(
+                                f"Anti-whipsaw: existing {pos_dir} position open, cannot open {new_dir}"
+                            )
+                            decision["reasons"].append(f"Anti-whipsaw blocked: {new_dir} vs open {pos_dir}")
+
+                # Cek cooldown dari posisi sebelumnya (in-memory)
+                if not decision["no_trade"] and self._last_trade_direction == opposite_dir:
+                    cooldown_min = 60  # 60 menit cooldown
+                    if self._last_trade_time is not None:
+                        elapsed = (datetime.now() - self._last_trade_time).total_seconds() / 60.0
+                        if elapsed < cooldown_min:
+                            decision["action"] = TradeDirection.HOLD.value
+                            decision["no_trade"] = True
+                            decision["no_trade_reasons"].append(
+                                f"Anti-whipsaw: {self._last_trade_direction} was {elapsed:.0f}min ago "
+                                f"(cooldown={cooldown_min}min), cannot open {new_dir}"
+                            )
+                            decision["reasons"].append(
+                                f"Anti-whipsaw cooldown: {self._last_trade_direction}→{new_dir} "
+                                f"({elapsed:.0f}/{cooldown_min}min)"
+                            )
 
             # ── Reversal WARNING: reduce confidence ──
             if reversal_info and reversal_info.get("severity") == TrendReversalDetector.WARNING and not decision["no_trade"]:
@@ -410,6 +449,14 @@ class DecisionEngine:
             decision["action"] = TradeDirection.HOLD.value
             decision["no_trade"] = True
             decision["reasons"].append(f"Error: {e}")
+
+        # ── Track last trade direction for whipsaw prevention ──
+        if not decision["no_trade"] and decision.get("action") in (TradeDirection.BUY.value, TradeDirection.SELL.value):
+            self._last_trade_direction = decision["action"]
+            # Note: time updated when trade actually opens, not just decision
+            # Set here for approximate tracking
+            if self._last_trade_time is None:
+                self._last_trade_time = datetime.now()
 
         self._last_decision = decision
         return decision

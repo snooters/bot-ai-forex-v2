@@ -57,8 +57,9 @@ class EntryEngine:
         # Higher confidence → lower R:R requirement (we trust the signal more)
         # Lower confidence → higher R:R requirement (need more buffer)
         confidence_val = decision.get("confidence", 0.5)
-        # Map: confidence 1.0 → min_rr 1.0, confidence 0.4 → min_rr 2.0
-        dynamic_min_rr = max(1.0, min(2.0, 2.5 - confidence_val * 1.5))
+        # Map: confidence 1.0 → min_rr 1.0, confidence 0.4 → min_rr 1.6
+        # Lower threshold gives more trades through while maintaining basic safety
+        dynamic_min_rr = max(1.0, min(1.6, 2.0 - confidence_val * 1.0))
         sl_dist = abs(entry_price - sl_price)
         if use_scale_out:
             blended_tp = tp1_price * 0.5 + tp2_price * 0.5
@@ -188,21 +189,21 @@ class EntryEngine:
 
         # ── SL ──
         if use_dynamic_sl and atr > 0:
-            atr_mult = 2.0 if is_small else 1.5
+            atr_mult = 2.0  # Fixed multiplier for all account sizes
             sl_distance = atr * atr_mult
         else:
             sl_distance = config.risk["sl_pips"] * pip_size
 
-        if is_small:
-            min_sl_pips = 25.0
-            max_sl_pips = 40.0
-            sl_pips = sl_distance / pip_size
-            if sl_pips < min_sl_pips:
-                sl_distance = min_sl_pips * pip_size
-                self.logger.info(f"SL floor: raised to {min_sl_pips}pips (was {sl_pips:.0f}pips)")
-            elif sl_pips > max_sl_pips:
-                sl_distance = max_sl_pips * pip_size
-                self.logger.info(f"SL ceiling: capped to {max_sl_pips}pips (was {sl_pips:.0f}pips)")
+        # Minimum SL: beri ruang napas dari spread & noise M5
+        min_sl_pips = 25.0 if is_small else 15.0
+        max_sl_pips = 40.0 if is_small else 0  # 0 = no ceiling
+        sl_pips = sl_distance / pip_size
+        if sl_pips < min_sl_pips:
+            sl_distance = min_sl_pips * pip_size
+            self.logger.info(f"SL floor: raised to {min_sl_pips}pips (was {sl_pips:.0f}pips)")
+        elif max_sl_pips > 0 and sl_pips > max_sl_pips:
+            sl_distance = max_sl_pips * pip_size
+            self.logger.info(f"SL ceiling: capped to {max_sl_pips}pips (was {sl_pips:.0f}pips)")
 
         sl_price = entry_price - sl_distance if direction == "BUY" else entry_price + sl_distance
 
@@ -246,9 +247,9 @@ class EntryEngine:
                     "use_scale_out": False,
                 }
             else:
-                # Scale-out: TP1 at 1:1.33, TP2 at 1:2.67, blended >= 1:2.0
-                tp1_distance = max(atr * 2.0, min_tp_dist)
-                tp2_distance = max(atr * 4.0, min_tp_dist * 2.5)
+                # Scale-out: TP1 at 1:1.5, TP2 at 1:2.5, blended >= 1:2.0
+                tp1_distance = max(atr * 3.0, min_tp_dist)
+                tp2_distance = max(atr * 5.0, min_tp_dist * 2.5)
                 tp1_price = entry_price + tp1_distance if direction == "BUY" else entry_price - tp1_distance
                 tp2_price = entry_price + tp2_distance if direction == "BUY" else entry_price - tp2_distance
                 return {

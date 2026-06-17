@@ -313,7 +313,57 @@ class ModelManager:
                     ensemble.register_model(name, model)
                 except Exception as e:
                     self.logger.warning(f"Failed to load {name}: {e}")
+
+        # ── Weight ensemble by val_accuracy ──
+        self._apply_ensemble_weights(ensemble, directory)
         return ensemble
+
+    def _apply_ensemble_weights(self, ensemble: VotingEnsemble, directory: Path):
+        """Set ensemble model weights based on validation accuracy from performance.json."""
+        perf_path = directory / "performance.json"
+        if perf_path.exists():
+            try:
+                with open(perf_path) as f:
+                    perf = json.load(f)
+                acc = perf.get("accuracy", {})
+                val_accs = {}
+                for name in ensemble.models:
+                    val_key = f"{name}_val"
+                    if val_key in acc:
+                        val_accs[name] = float(acc[val_key])
+                    elif name in acc:
+                        val_accs[name] = float(acc[name])
+                if val_accs:
+                    ensemble.set_weights_from_val_accuracy(val_accs)
+                    return
+            except Exception as e:
+                self.logger.debug(f"Cannot read performance for weighting: {e}")
+
+        # Fallback: look up aggregated performance from version history
+        # (e.g., for production dirs without their own performance.json)
+        try:
+            meta_path = directory / "metadata.json"
+            if meta_path.exists():
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                version = meta.get("version", "")
+                if version:
+                    perf = self._load_performance(version)
+                    acc = perf.get("accuracy", {})
+                    val_accs = {}
+                    for name in ensemble.models:
+                        val_key = f"{name}_val"
+                        if val_key in acc:
+                            val_accs[name] = float(acc[val_key])
+                        elif name in acc:
+                            val_accs[name] = float(acc[name])
+                    if val_accs:
+                        ensemble.set_weights_from_val_accuracy(val_accs)
+                        return
+        except Exception:
+            pass
+
+        self.logger.info("No performance data for ensemble weighting — using uniform weights")
 
     def save_ensemble(self, ensemble: VotingEnsemble, version: Optional[str] = None, timeframe: Optional[int] = None) -> str:
         if version is None:
@@ -396,6 +446,10 @@ class ModelManager:
                     self.logger.info(f"Loaded {name} from {model_path}")
             except Exception as e:
                 self.logger.error(f"Failed to load {name}: {e}")
+        # ── Weight ensemble by val_accuracy ──
+        self._apply_ensemble_weights(ensemble, version_dir)
+
+        ensemble.version = version
         self._current_version = version
         self._version_metadata[version] = metadata
         self.logger.info(f"Loaded model version {version} with {ensemble.get_num_models()} models")
@@ -537,7 +591,16 @@ class ModelManager:
             # v10_M15 punya WR=98% PF=68571 — itu PALSU
             # v28_M5 punya WR=36% PF=6.74 — itu NYATA
             oos["win_rate"] = min(wr_raw, 75.0) if wr_raw > 80 else wr_raw
-            oos["profit_factor"] = min(pf_raw, 5.0) if pf_raw > 15 else pf_raw
+            if pf_raw > 50:
+                if wr_raw > 80:
+                    # Legacy bug: PF>50 AND WR>80 jelas tidak realistis
+                    # (contoh: v10_M15 PF=68571 WR=98%)
+                    oos["profit_factor"] = min(pf_raw, 5.0)
+                else:
+                    # Model modern dengan PF realistis > 50 (sangat jarang)
+                    oos["profit_factor"] = min(pf_raw, 50.0)
+            else:
+                oos["profit_factor"] = pf_raw
             oos["sharpe_ratio"] = min(sh_raw, 3.0) if sh_raw > 4 else sh_raw
             # Accuracy capping
             acc_raw = float(oos.get("accuracy", 0))

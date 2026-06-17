@@ -18,9 +18,12 @@ from utils.logger import get_logger
 from utils.decorators import measure_time, safe_execute
 
 
-# Max features: set high to keep ALL features. Feature selection
-# was too aggressive at 40 — v33_M5 proved 135 features work best (OOS 74.3).
-MAX_FEATURES_TARGET = 999
+# Max features: reduced from 135 to 50 based on v44_M5 feature importance.
+# The bottom 85 features have importance < 79 and include many zero-importance
+# columns (is_weekend, dist_to_support, etc.). Pruning reduces overfitting risk
+# from the 135:5000 feature:sample ratio. Previous attempt at 40 was too aggressive
+# (v33_M5 era), but with 581 sim trades + recency weighting, 50 is a reasonable target.
+MAX_FEATURES_TARGET = 50
 
 
 class ModelTrainer:
@@ -451,6 +454,19 @@ class ModelTrainer:
             results["ensemble"]["num_models"] = self.ensemble.get_num_models()
             results["ensemble"]["active_models"] = self.ensemble.get_active_models()
             self.logger.info(f"Ensemble ready with {self.ensemble.get_num_models()} models")
+
+            # ── Set ensemble weights based on val_accuracy ──
+            val_accs = {}
+            for name, model_result in results.get("models", {}).items():
+                if isinstance(model_result, dict):
+                    va = model_result.get("val_accuracy", 0)
+                    if va > 0:
+                        val_accs[name] = va
+            if val_accs:
+                self.ensemble.set_weights_from_val_accuracy(val_accs)
+                results["ensemble"]["weights"] = dict(self.ensemble.weights)
+            else:
+                self.logger.info("No val_accuracy from training — keeping uniform ensemble weights")
 
             try:
                 val_probas = self.ensemble.predict_proba(X_val)
