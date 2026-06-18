@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from core.config import config
 from core.constants import ML_WEIGHT, INTELLIGENCE_WEIGHT, TrendDirection, TradeDirection, Timeframe
@@ -244,7 +244,8 @@ class DecisionEngine:
 
                 if combined_buy > combined_sell:
                     if self._validate_entry(direction="BUY", confidence=confidence,
-                                            trend_result=trend_result, sr_info=sr_info, df=df):
+                                            trend_result=trend_result, sr_info=sr_info, df=df,
+                                            multi_tf_trends=multi_tf_trends, reasons=decision["reasons"]):
                         decision["action"] = TradeDirection.BUY.value
                         decision["no_trade"] = False
                         label = "STRONG" if confidence >= 0.70 else "WEAK"
@@ -261,7 +262,8 @@ class DecisionEngine:
 
                 elif combined_sell > combined_buy:
                     if self._validate_entry(direction="SELL", confidence=confidence,
-                                            trend_result=trend_result, sr_info=sr_info, df=df):
+                                            trend_result=trend_result, sr_info=sr_info, df=df,
+                                            multi_tf_trends=multi_tf_trends, reasons=decision["reasons"]):
                         decision["action"] = TradeDirection.SELL.value
                         decision["no_trade"] = False
                         label = "STRONG" if confidence >= 0.70 else "WEAK"
@@ -547,7 +549,27 @@ class DecisionEngine:
         trend_result: Dict,
         sr_info: Dict,
         df,
+        multi_tf_trends: Optional[Dict] = None,
+        reasons: Optional[List] = None,
     ) -> bool:
+        # ── Multi-TF guard: cegah counter-trend entry tanpa confidence tinggi ──
+        # Hanya aktif di non-simulation mode
+        if multi_tf_trends and not self.simulation_mode:
+            h4 = multi_tf_trends.get("trend240", 0)
+            h1 = multi_tf_trends.get("trend60", 0)
+            threshold = 0.65  # Counter-trend butuh confidence > normal (0.55)
+
+            if direction == "BUY":
+                if h4 < 0 and h1 < 0 and confidence < threshold:
+                    if reasons is not None:
+                        reasons.append(f"Counter-trend BUY blocked: H4({h4}) H1({h1}) bearish, conf={confidence:.2f}")
+                    return False
+            elif direction == "SELL":
+                if h4 > 0 and h1 > 0 and confidence < threshold:
+                    if reasons is not None:
+                        reasons.append(f"Counter-trend SELL blocked: H4({h4}) H1({h1}) bullish, conf={confidence:.2f}")
+                    return False
+
         if "atr" in df.columns and not df["atr"].empty:
             atr = df["atr"].iloc[-1]
             if atr > 0:

@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pandas as pd
 
+from core.config import config
 from core.constants import LOOKAHEAD_5, RESULTS_DIR
 from features.feature_pipeline import FeaturePipeline
 from ml.ensemble import VotingEnsemble
@@ -251,10 +252,12 @@ class WalkForwardValidator:
         current_close = df["close"]
         future_return = (future_close - current_close) / current_close
 
+        buy_th = config.training["buy_threshold"]
+        sell_th = config.training["sell_threshold"]
         y_true = np.zeros(len(df), dtype=int)
-        y_true[future_return > 0.001] = 0
-        y_true[future_return < -0.001] = 1
-        y_true[(future_return >= -0.001) & (future_return <= 0.001)] = 2
+        y_true[future_return > buy_th] = 0
+        y_true[future_return < -sell_th] = 1
+        y_true[(future_return >= -sell_th) & (future_return <= buy_th)] = 2
 
         X_df = df[available_cols].apply(pd.to_numeric, errors='coerce')
         mask = ~np.isnan(y_true) & ~X_df.isna().any(axis=1)

@@ -247,8 +247,13 @@ def train_m5_model(
             logger.warning(f"Could not re-evaluate old model: {e}")
             old_score = 0
     elif best_ver:
-        old_oos = model_manager.get_oos_result(best_ver)
-        old_score = model_manager._compute_oos_numeric_score(old_oos)
+        # Warm-start skipped (features/lookahead changed) — cannot compare with old model.
+        # Accept new model as fresh baseline.
+        logger.info(
+            f"Warm-start not applicable (feature/lookahead change detected). "
+            f"Accepting new model as fresh baseline (skipping old comparison)."
+        )
+        old_score = 0
     # ── Save feature importance EVEN IF rejected (so next retrain has data) ──
     if args.save_fi and best_ver:
         # Overwrite the best version's feature importance with new data
@@ -376,19 +381,19 @@ def train_pair(args: argparse.Namespace) -> Dict:
 
 def find_pairs_in_storage() -> List[str]:
     """Discover available pairs from parquet storage."""
-    storage_dir = Path(config.data.get("storage", "storage"))
-    if not storage_dir.exists():
-        logger.error(f"Storage dir not found: {storage_dir}")
+    from core.constants import DATA_DIR
+    historical_dir = Path(DATA_DIR) / "historical"
+    if not historical_dir.exists():
+        logger.error(f"Historical data dir not found: {historical_dir}")
         return []
 
-    pair_files = set()
-    for f in storage_dir.glob("*.parquet"):
-        parts = f.stem.split("_")
-        if len(parts) >= 1:
-            pair = parts[0].upper()
-            if len(pair) == 6:
-                pair_files.add(pair)
-    return sorted(pair_files)
+    pairs = []
+    for d in historical_dir.iterdir():
+        if d.is_dir():
+            pair_name = d.name.upper().replace(".FL", "")
+            if len(pair_name) == 6:
+                pairs.append(pair_name)
+    return sorted(pairs)
 
 
 def main() -> None:

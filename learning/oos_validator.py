@@ -4,6 +4,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from core.config import config
 from core.constants import LOOKAHEAD_5
 from features.feature_pipeline import FeaturePipeline
 from ml.ensemble import VotingEnsemble
@@ -37,10 +38,14 @@ class OOSValidator:
         trainer: ModelTrainer,
         timeframe_label: str,
         oos_split: float = 0.2,
-        buy_threshold: float = 0.001,
-        sell_threshold: float = 0.001,
+        buy_threshold: Optional[float] = None,
+        sell_threshold: Optional[float] = None,
         timeframe: Optional[int] = None,
     ) -> Dict:
+        if buy_threshold is None:
+            buy_threshold = config.training["buy_threshold"]
+        if sell_threshold is None:
+            sell_threshold = config.training["sell_threshold"]
         if df.empty or len(df) < 400:
             return self._empty_result("insufficient data (<400 rows)")
 
@@ -167,7 +172,12 @@ class OOSValidator:
         return result
 
     def _validate_split(self, val_df: pd.DataFrame, ensemble: VotingEnsemble, feature_cols: List[str],
-                         buy_threshold: float = 0.001, sell_threshold: float = 0.001) -> Dict:
+                         buy_threshold: Optional[float] = None,
+                         sell_threshold: Optional[float] = None) -> Dict:
+        if buy_threshold is None:
+            buy_threshold = config.training["buy_threshold"]
+        if sell_threshold is None:
+            sell_threshold = config.training["sell_threshold"]
         val_clean = val_df.copy()
         missing_cols = [c for c in feature_cols if c not in val_clean.columns]
         if missing_cols:
@@ -192,8 +202,12 @@ class OOSValidator:
             return {"accuracy": 0}
 
     def _prepare_labels(self, df: pd.DataFrame, available_cols: List[str],
-                        buy_threshold: float = 0.001,
-                        sell_threshold: float = 0.001) -> Tuple[np.ndarray, np.ndarray]:
+                         buy_threshold: Optional[float] = None,
+                         sell_threshold: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+        if buy_threshold is None:
+            buy_threshold = config.training["buy_threshold"]
+        if sell_threshold is None:
+            sell_threshold = config.training["sell_threshold"]
         future_close = df["close"].shift(-LOOKAHEAD_5)
         current_close = df["close"]
         future_return = (future_close - current_close) / current_close
