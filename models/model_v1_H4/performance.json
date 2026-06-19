@@ -1,9 +1,13 @@
 {
   "accuracy": {
-    "xgboost": 0.8710462287104623,
-    "xgboost_val": 0.4401294498381877,
-    "random_forest": 0.8110300081103001,
-    "random_forest_val": 0.3883495145631068
+    "xgboost": 0.6704331450094162,
+    "xgboost_val": 0.3308270676691729,
+    "random_forest": 0.5489642184557438,
+    "random_forest_val": 0.2631578947368421,
+    "lightgbm": 0.9858757062146892,
+    "lightgbm_val": 0.40225563909774437,
+    "lstm": 0.5014520813165537,
+    "lstm_val": 0.3670886075949367
   },
-  "samples": 1542
+  "samples": 1328
 }

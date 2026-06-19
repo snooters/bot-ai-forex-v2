@@ -86,11 +86,19 @@ class RiskManager:
         )
 
         risk_amount = balance * risk_pct
-        risk_pct_actual = min(risk_pct * vol_mult, config.risk["max_risk_pct"] * 2 * aggr_mult)
+        risk_pct_actual = min(risk_pct * vol_mult, config.risk["max_risk_pct"] * aggr_mult)
 
         rr_ratio = tp_pips / max(sl_pips, 1)
 
         self.account_monitor.record_trade()
+
+        # Risk compliance check: verify risk_pct_actual does not exceed max_risk_pct
+        if risk_pct_actual > config.risk["max_risk_pct"] * 1.01:
+            result["reasons"].append(
+                f"Risk {risk_pct_actual:.4f} exceeds max {config.risk['max_risk_pct']:.4f}"
+            )
+            self.logger.warning(f"Trade REJECTED: risk {risk_pct_actual:.4f} > max {config.risk['max_risk_pct']:.4f}")
+            return result  # allowed stays False
 
         result["allowed"] = True
         result["lot_size"] = lot_size

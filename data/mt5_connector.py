@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple
 
 import pandas as pd
@@ -327,7 +327,7 @@ class MT5Connector:
                 "type": "BUY" if pos.type == 0 else "SELL",
                 "volume": pos.volume, "price_open": pos.price_open,
                 "sl": pos.sl, "tp": pos.tp, "profit": pos.profit,
-                "swap": pos.swap, "time": datetime.fromtimestamp(pos.time),
+                "swap": pos.swap, "time": datetime.fromtimestamp(pos.time, tz=timezone.utc),
                 "comment": pos.comment,
             })
         return result
@@ -363,7 +363,7 @@ class MT5Connector:
             return None
         return {
             "bid": tick.bid, "ask": tick.ask, "last": tick.last,
-            "volume": tick.volume, "time": datetime.fromtimestamp(tick.time),
+            "volume": tick.volume, "time": datetime.fromtimestamp(tick.time, tz=timezone.utc),
         }
 
     def _get_filling_type(self, symbol: str):

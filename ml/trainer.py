@@ -23,6 +23,11 @@ from utils.decorators import measure_time, safe_execute
 # columns (is_weekend, dist_to_support, etc.). Pruning reduces overfitting risk
 # from the 135:5000 feature:sample ratio. Previous attempt at 40 was too aggressive
 # (v33_M5 era), but with 581 sim trades + recency weighting, 50 is a reasonable target.
+#
+# IMPORTANT: _load_feature_importance() now SKIPS biased versions (<100 features)
+# to break the chicken-and-egg cycle that previously dropped multi-TF features
+# permanently. Only full-feature importance (e.g. v44_M5 with 135 features) is
+# used for selection, ensuring multi-TF features get a fair ranking.
 MAX_FEATURES_TARGET = 50
 
 
@@ -54,20 +59,51 @@ class ModelTrainer:
             return None
 
     def _load_feature_importance(self, pair: str, timeframe: int) -> Optional[Dict[str, float]]:
-        """Load saved feature importance from latest training run (if any)."""
+        """Load saved feature importance from training run.
+
+        Prefers the version with the MOST NON-ZERO features to break the
+        iterative selection bias cycle. Biased versions (e.g. v60_M5 with
+        only 49 non-zero features) are skipped in favour of full-feature
+        versions (e.g. v44_M5 with 125 non-zero features), ensuring that
+        multi-TF features get a fair ranking in the selection process.
+        """
         try:
             results_dir = Path(RESULTS_DIR) / pair / str(timeframe)
             if not results_dir.exists():
                 return None
+
             versions = sorted(results_dir.iterdir(), reverse=True)
+            best_fi = None
+            best_nz = 0  # track non-zero feature count
+            best_total = 0
+
             for v_dir in versions:
                 fi_file = v_dir / "feature_importance.csv"
                 if fi_file.exists():
                     fi_df = pd.read_csv(fi_file)
                     if "feature" in fi_df.columns and "importance" in fi_df.columns:
                         fi_dict = dict(zip(fi_df["feature"], fi_df["importance"]))
-                        self.logger.info(f"Loaded feature importance from {fi_file} ({len(fi_dict)} features)")
-                        return fi_dict
+                        nz = sum(1 for v in fi_dict.values() if v > 0)
+                        total = len(fi_dict)
+
+                        # Prefer version with most non-zero features
+                        # (full-feature runs like v44_M5 have 125/135 non-zero;
+                        #  biased runs have <50 non-zero)
+                        if nz > best_nz:
+                            best_fi = (fi_dict, fi_file, total, nz)
+                            best_nz = nz
+                            best_total = total
+
+            if best_fi:
+                fi_dict, fi_file, total, nz = best_fi
+                level = "info" if nz >= 100 else "warning"
+                getattr(self.logger, level)(
+                    f"Loaded feature importance from {fi_file} "
+                    f"({nz}/{total} non-zero features) — "
+                    f"{'unbiased' if nz >= 100 else 'biased'} selection"
+                )
+                return fi_dict
+
             return None
         except Exception as e:
             self.logger.debug(f"Could not load feature importance: {e}")
@@ -107,10 +143,17 @@ class ModelTrainer:
 
         selected = [col for col, _ in scored[:max_features]]
         dropped = len(available_cols) - len(selected)
+        dropped_names = [col for col, _ in scored[max_features:]]
         self.logger.info(
             f"Feature selection: {len(selected)}/{len(available_cols)} features kept "
             f"(dropped {dropped} low-importance features)"
         )
+        if dropped_names:
+            self.logger.info(
+                f"Dropped features ({len(dropped_names)}): "
+                f"{', '.join(dropped_names[:20])}"
+                f"{'...' if len(dropped_names) > 20 else ''}"
+            )
         return selected
 
     @measure_time

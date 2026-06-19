@@ -1,0 +1,73 @@
+{
+  "version": "v1_M5",
+  "created_at": "2026-06-19T10:00:20.325542",
+  "timeframe": "M5",
+  "timeframe_minutes": 5,
+  "source": "auto_retrain",
+  "models": {
+    "xgboost": {
+      "path": "models\\model_v1_M5\\xgboost.ubj",
+      "trained": true
+    },
+    "random_forest": {
+      "path": "models\\model_v1_M5\\random_forest.ubj",
+      "trained": true
+    },
+    "lightgbm": {
+      "path": "models\\model_v1_M5\\lightgbm.ubj",
+      "trained": true
+    }
+  },
+  "feature_cols": [
+    "adx",
+    "obv",
+    "atr",
+    "mass_index",
+    "vwap",
+    "minus_di",
+    "ema_cross",
+    "hour",
+    "price_vs_ema200",
+    "volatility",
+    "ema_200",
+    "bb_width",
+    "bb_upper",
+    "volume_ratio",
+    "momentum_20",
+    "macd_signal",
+    "plus_di",
+    "momentum_10",
+    "volume_trend",
+    "stoch_cross",
+    "stoch_d",
+    "cci",
+    "hl_range",
+    "macd_histogram",
+    "price_position",
+    "ema_slope_50",
+    "macd",
+    "ema_50",
+    "bb_pct",
+    "bb_lower",
+    "upper_wick",
+    "rsi",
+    "ema_slope_20",
+    "stoch_k",
+    "lower_wick",
+    "returns",
+    "ema_20",
+    "body",
+    "bb_mid",
+    "spread_pips",
+    "realized_vol",
+    "williams_r",
+    "macd_cross",
+    "log_return",
+    "adx_strong",
+    "bb_position",
+    "rsi_oversold",
+    "rsi_overbought",
+    "macd_above_zero",
+    "nearest_support"
+  ]
+}

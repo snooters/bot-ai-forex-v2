@@ -23,6 +23,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -42,6 +43,21 @@ class NumpyEncoder(json.JSONEncoder):
 
 
 app = FastAPI(title="AI Forex Bot", version="2.0.0")
+
+
+# ── No-cache middleware (dashboard files only) ──
+#     Ensures browser always fetches latest HTML/CSS from disk.
+
+class _NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/dashboard"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+app.add_middleware(_NoCacheMiddleware)
 
 
 # ── Heartbeat state (used by main.py for /health, /status, /metrics) ──
@@ -135,6 +151,82 @@ def get_full_state():
 @app.get("/api/candles/{symbol}")
 def get_candles(symbol: str):
     return _candles_cache.get(symbol.upper(), [])
+
+
+_TRADE_DB = Path(__file__).resolve().parent.parent / "learning" / "trade_history" / "trade_memory.db"
+
+
+@app.get("/api/stats")
+def get_stats():
+    """Daily, weekly, monthly win rates from trade_memory.db."""
+    if not _TRADE_DB.is_file():
+        return {"daily": None, "weekly": None, "monthly": None}
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(_TRADE_DB))
+        cur = conn.execute("SELECT exit_time, result FROM trades WHERE result IN ('WIN','LOSS')")
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return {"daily": None, "weekly": None, "monthly": None}
+
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+
+    def _calc(marker):
+        wins = 0
+        total = 0
+        for et, res in rows:
+            try:
+                t = datetime.fromisoformat(et)
+            except Exception:
+                continue
+            if marker(t):
+                total += 1
+                if res == "WIN":
+                    wins += 1
+        return round(wins / total * 100, 1) if total > 0 else None
+
+    return {
+        "daily": _calc(lambda t: t >= today_start),
+        "weekly": _calc(lambda t: t >= week_start),
+        "monthly": _calc(lambda t: t >= month_start),
+    }
+
+
+@app.get("/api/monthly_pnl")
+def get_monthly_pnl():
+    """Total closed P&L this month (bot trades only)."""
+    if not _TRADE_DB.is_file():
+        return {"profit": 0.0}
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(_TRADE_DB))
+        cur = conn.execute(
+            "SELECT exit_time, profit, exit_reason FROM trades WHERE result IN ('WIN','LOSS')"
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return {"profit": 0.0}
+
+    from datetime import datetime
+    now = datetime.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    total = 0.0
+    for et, p, reason in rows:
+        if reason == "MT5":
+            continue
+        try:
+            t = datetime.fromisoformat(et)
+        except Exception:
+            continue
+        if t >= month_start:
+            total += p
+    return {"profit": round(total, 2)}
 
 
 # ── WebSocket real-time push ──

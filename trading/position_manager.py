@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Dict, Optional, List
 
 from core.config import config
@@ -64,7 +65,7 @@ class PositionManager:
                 })
                 continue
 
-            # ── Breakeven SL (Langkah 4): SL = entry + spread after 1 ATR move ──
+            # ── Breakeven SL: SL = entry + buffer after sufficient price move ──
             if atr > 0:
                 entry = position.get("price_open", 0)
                 is_buy = position["type"] == "BUY"
@@ -75,7 +76,10 @@ class PositionManager:
                 be_buffer = spread * pip_size * 0.5
                 be_price = entry + be_buffer if is_buy else entry - be_buffer
 
-                if price_move >= atr:
+                # Use breakeven_trigger_pips config value (default 20) instead of raw ATR
+                be_trigger_pips = config.risk.get("breakeven_trigger_pips", 20)
+                be_trigger_dist = be_trigger_pips * pip_size
+                if price_move >= max(atr, be_trigger_dist):
                     if is_buy and (current_sl is None or current_sl < be_price):
                         self.execution_engine.modify_position(position["ticket"], sl=be_price)
                         self.logger.info(f"Breakeven SL set for ticket {position['ticket']} at {be_price:.5f}")
@@ -96,6 +100,19 @@ class PositionManager:
                         if new_sl < (current_sl or float("inf")):
                             self.execution_engine.modify_position(position["ticket"], sl=new_sl)
                             self.logger.info(f"Runner trail: ticket {position['ticket']} SL -> {new_sl:.5f}")
+
+            # ── Debug: log position details before exit evaluation ──
+            pos_time = position.get("time")
+            pos_age_min = None
+            if isinstance(pos_time, datetime):
+                pos_age_min = (datetime.now(timezone.utc) - pos_time).total_seconds() / 60.0
+            self.logger.debug(
+                f"ExitEval ticket={position['ticket']} type={position['type']} "
+                f"profit={position.get('profit', 0):.2f} "
+                f"price={current_price:.5f} entry={position.get('price_open', 0):.5f} "
+                f"conf={confidence:.2f} atr={atr:.5f} "
+                f"age={pos_age_min:.1f}min time={pos_time}"
+            )
 
             exit_result = self.exit_engine.evaluate_exit(
                 position=position,
@@ -119,6 +136,15 @@ class PositionManager:
             else:
                 action = exit_result
                 reasons = []
+
+            # ── Log if position is being closed ──
+            if action in (PositionAction.FULL_CLOSE, PositionAction.PARTIAL_CLOSE):
+                self.logger.info(
+                    f"CLOSING ticket={position['ticket']} type={position['type']} "
+                    f"action={action.value} profit={position.get('profit', 0):.2f} "
+                    f"age={pos_age_min:.1f}min conf={confidence:.2f} "
+                    f"reason={'; '.join(reasons) if reasons else 'N/A'}"
+                )
 
             result = self._execute_action(position, action, current_price, atr)
             actions_taken.append({

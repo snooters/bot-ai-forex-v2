@@ -229,8 +229,11 @@ class DecisionEngine:
                     )
             else:
                 intel_base = market_score / 100.0
-                buy_boost = intel_base
-                sell_boost = 1.0 - intel_base
+                # Dampened boost: reduce bias when market_score is far from 50
+                center = 0.5
+                dampening = 0.3  # 0 = no market influence, 1 = full market influence
+                buy_boost = center + (intel_base - center) * dampening
+                sell_boost = center - (intel_base - center) * dampening
                 combined_buy = (
                     ml_signal.get("buy_prob", 0) * ML_WEIGHT +
                     buy_boost * INTELLIGENCE_WEIGHT
@@ -290,7 +293,8 @@ class DecisionEngine:
                 ml_sell_prob = ml_signal.get("sell_prob", 0)
 
                 if trend_dir == TrendDirection.STRONG_BULLISH.value:
-                    if current_action in (TradeDirection.HOLD.value, TradeDirection.SELL.value):
+                    if current_action in (TradeDirection.HOLD.value, TradeDirection.SELL.value,
+                                          TradeDirection.WEAK_SELL.value):
                         # Don't override if ML confidently disagrees
                         if ml_sell_prob < 0.50:
                             decision["action"] = TradeDirection.BUY.value
@@ -300,7 +304,8 @@ class DecisionEngine:
                                 f"Trend override suppressed: ML sell_prob={ml_sell_prob:.2f}"
                             )
                 elif trend_dir == TrendDirection.STRONG_BEARISH.value:
-                    if current_action in (TradeDirection.HOLD.value, TradeDirection.BUY.value):
+                    if current_action in (TradeDirection.HOLD.value, TradeDirection.BUY.value,
+                                          TradeDirection.WEAK_BUY.value):
                         # Don't override if ML confidently disagrees
                         if ml_buy_prob < 0.50:
                             decision["action"] = TradeDirection.SELL.value

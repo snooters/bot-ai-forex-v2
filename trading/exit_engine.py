@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, List
 
 import numpy as np
@@ -19,13 +19,91 @@ class ExitEngine:
         self.logger = get_logger("exit_engine")
         self.execution_engine = execution_engine
         self.data_engine = data_engine
+        # Track tickets with future timestamps to avoid log spam
+        self._future_time_tickets: Dict[int, int] = {}  # ticket -> warning count
+        self._future_time_close_threshold = 5  # force close after N warnings
+
+    MAX_SANE_ELAPSED_MINUTES = 7 * 24 * 60  # 7 days — anything beyond is unrealistic
 
     def _get_elapsed_minutes(self, position: Dict) -> Optional[float]:
-        """Returns minutes elapsed since position open time, or None if unavailable."""
+        """Returns minutes elapsed since position open time, or None if unavailable/invalid."""
         open_time = position.get("time")
-        if not open_time:
+        ticket = position.get('ticket', '?')
+        if open_time is None:
+            self.logger.warning(
+                f"Position {ticket} has no 'time' field — "
+                f"keys={list(position.keys())}"
+            )
             return None
-        return (datetime.now() - open_time).total_seconds() / 60.0
+        if not isinstance(open_time, datetime):
+            self.logger.warning(
+                f"Position {ticket} 'time' field is not datetime: "
+                f"type={type(open_time).__name__} value={open_time}"
+            )
+            return None
+        try:
+            # Ensure open_time is UTC-aware for consistent comparison
+            if open_time.tzinfo is None:
+                open_time = open_time.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
+            elapsed_sec = (now - open_time).total_seconds()
+            
+            # Sanity check: if elapsed is unreasonably large (e.g. pos.time = 0 from broker)
+            # or negative (future timestamp), treat as invalid.
+            if elapsed_sec < 0:
+                # Track warning count per ticket to avoid log spam
+                tid = ticket if isinstance(ticket, int) else hash(str(ticket))
+                self._future_time_tickets[tid] = self._future_time_tickets.get(tid, 0) + 1
+                warn_count = self._future_time_tickets[tid]
+                
+                if warn_count == 1:
+                    self.logger.warning(
+                        f"Position {ticket} has FUTURE time: "
+                        f"open_time={open_time} (elapsed={elapsed_sec:.0f}s) — "
+                        f"treating as invalid. Will auto-close after "
+                        f"{self._future_time_close_threshold} warnings."
+                    )
+                elif warn_count < self._future_time_close_threshold:
+                    self.logger.debug(
+                        f"Position {ticket} still has FUTURE time "
+                        f"(warning #{warn_count}) — skipping"
+                    )
+                else:
+                    # Force close this position — it has an invalid timestamp
+                    self.logger.warning(
+                        f"Position {ticket} has had FUTURE time for "
+                        f"{warn_count} checks — force closing!"
+                    )
+                    try:
+                        close_result = self.execution_engine.close_position(position)
+                        if close_result:
+                            self.logger.info(f"Force closed FUTURE-time position {ticket}")
+                        else:
+                            self.logger.error(f"Failed to force close position {ticket}")
+                    except Exception as e:
+                        self.logger.error(f"Error force closing position {ticket}: {e}")
+                return None
+            
+            if elapsed_sec > self.MAX_SANE_ELAPSED_MINUTES * 60:
+                self.logger.warning(
+                    f"Position {ticket} has UNREALISTIC age: "
+                    f"elapsed={elapsed_sec/3600:.1f}h (open_time={open_time}) — "
+                    f"broker may return time=0. Treating as invalid."
+                )
+                return None
+            
+            # Reset future-time counter if position becomes valid
+            tid = ticket if isinstance(ticket, int) else hash(str(ticket))
+            self._future_time_tickets.pop(tid, None)
+            
+            return elapsed_sec / 60.0
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to compute elapsed time for ticket {ticket}: "
+                f"{e} (open_time={open_time}, type={type(open_time).__name__})"
+            )
+            return None
 
     def evaluate_exit(
         self,
@@ -44,6 +122,14 @@ class ExitEngine:
         action = PositionAction.HOLD
         reasons = []
         close_profit_score = 0
+
+        # Debug: log entry conditions
+        self.logger.debug(
+            f"evaluate_exit ticket={position.get('ticket','?')} "
+            f"profit={position.get('profit', 0):.2f} conf={confidence:.2f} "
+            f"atr={atr:.5f} price={current_price:.5f} "
+            f"entry={position.get('price_open', 0):.5f}"
+        )
 
         is_buy = position["type"] == "BUY"
         entry = position.get("price_open", 0)
@@ -100,9 +186,16 @@ class ExitEngine:
             if action != PositionAction.FULL_CLOSE:
                 elapsed_min = self._get_elapsed_minutes(position)
                 min_hold = config.trading.get("min_hold_minutes", 15)
-                if elapsed_min is None or elapsed_min >= min_hold:
+                if elapsed_min is not None and elapsed_min >= min_hold:
                     action = PositionAction.FULL_CLOSE
                     reasons.append(f"Confidence dropped to {confidence:.0%}")
+                elif elapsed_min is None:
+                    # Position time unavailable — log warning but DON'T close
+                    # to prevent immediate close on fresh positions
+                    self.logger.warning(
+                        f"Cannot determine age for ticket {position.get('ticket','?')} "
+                        f"— confidence={confidence:.0%} but skipping close (time field missing)"
+                    )
 
         # ── Break of structure: close ──
         if market_structure:
@@ -111,10 +204,19 @@ class ExitEngine:
                     action = PositionAction.FULL_CLOSE
                     reasons.append("Break of structure detected")
 
-        # ── News-driven: close ──
+        # ── News-driven: close (only after min hold time) ──
         if regime_result.get("regime") == "NEWS_DRIVEN":
-            action = PositionAction.FULL_CLOSE
-            reasons.append("News driven market - closing positions")
+            elapsed_min = self._get_elapsed_minutes(position)
+            min_hold = config.trading.get("min_hold_minutes", 15)
+            if elapsed_min is not None and elapsed_min >= min_hold:
+                action = PositionAction.FULL_CLOSE
+                reasons.append("News driven market - closing positions")
+            else:
+                # Don't close immediately — let the trade develop for min_hold minutes
+                self.logger.debug(
+                    f"News-driven regime detected but holding ticket {position.get('ticket','?')} "
+                    f"(age={elapsed_min:.1f}min < {min_hold}min min_hold)"
+                )
 
         # ── TP reached: close ──
         tp = position.get("tp", 0) or 0
@@ -136,51 +238,63 @@ class ExitEngine:
         # ── ATR-based trailing stop ──
         current_sl = position.get("sl", 0)
         if current_profit > 0 and atr > 0:
-            trailing_dist = atr * config.risk.get("trailing_atr_multiplier", 1.5)
-            if is_buy:
-                new_sl = current_price - trailing_dist
-                if new_sl > current_sl:
-                    if action == PositionAction.HOLD:
-                        action = PositionAction.TRAILING_STOP
-                    reasons.append(f"Trailing stop: SL -> {new_sl:.5f}")
-            else:
-                new_sl = current_price + trailing_dist
-                if new_sl < current_sl or current_sl == 0:
-                    if action == PositionAction.HOLD:
-                        action = PositionAction.TRAILING_STOP
-                    reasons.append(f"Trailing stop: SL -> {new_sl:.5f}")
+            # Require minimum profit distance before trailing activates
+            trailing_activate_pips = config.risk.get("trailing_activate", 20)
+            profit_distance_pips = profit_pips if abs(profit_pips) < 10000 else 0
+            if profit_distance_pips >= trailing_activate_pips:
+                trailing_dist = atr * config.risk.get("trailing_atr_multiplier", 1.5)
+                if is_buy:
+                    new_sl = current_price - trailing_dist
+                    if new_sl > current_sl:
+                        if action == PositionAction.HOLD:
+                            action = PositionAction.TRAILING_STOP
+                        reasons.append(f"Trailing stop: SL -> {new_sl:.5f}")
+                else:
+                    new_sl = current_price + trailing_dist
+                    if new_sl < current_sl or current_sl == 0:
+                        if action == PositionAction.HOLD:
+                            action = PositionAction.TRAILING_STOP
+                        reasons.append(f"Trailing stop: SL -> {new_sl:.5f}")
 
         # ── Time-based exit ──
         open_time = position.get("time")
-        if open_time:
-            max_hold_seconds = config.risk.get("max_hold_hours", 12) * 3600
-            elapsed = (datetime.now() - open_time).total_seconds()
-            if elapsed > max_hold_seconds:
-                action = PositionAction.FULL_CLOSE
-                reasons.append(f"Max hold time reached ({elapsed/3600:.1f}h)")
+        if open_time and isinstance(open_time, datetime):
+            elapsed = (datetime.now(timezone.utc) - open_time).total_seconds()
+            # Only apply time-based exit if elapsed is sane (> 0 and < 7 days)
+            if 0 < elapsed < self.MAX_SANE_ELAPSED_MINUTES * 60:
+                max_hold_seconds = config.risk.get("max_hold_hours", 12) * 3600
+                if elapsed > max_hold_seconds:
+                    action = PositionAction.FULL_CLOSE
+                    reasons.append(f"Max hold time reached ({elapsed/3600:.1f}h)")
 
         # ── SECURE_PROFIT: Close profitable position when TP reach probability is low ──
         if current_profit > 0 and action not in [PositionAction.FULL_CLOSE]:
-            secure = self._evaluate_secure_profit(
-                position=position,
-                current_price=current_price,
-                current_profit=current_profit,
-                profit_pips=profit_pips,
-                trend_result=trend_result,
-                regime_result=regime_result,
-                confidence=confidence,
-                multi_tf_trends=multi_tf_trends or {},
-                momentum_result=momentum_result or {},
-                vol_result=vol_result or {},
-                rsi=rsi,
-                atr=atr,
-                is_buy=is_buy,
-                entry=entry,
-            )
-            if secure["should_close"]:
-                action = PositionAction.FULL_CLOSE
-                reasons.append(secure["reason"])
-                close_profit_score = secure["score"]
+            # Enforce minimum hold time before secure profit close
+            elapsed_min = self._get_elapsed_minutes(position)
+            min_hold = config.trading.get("min_hold_minutes", 15)
+            if elapsed_min is not None and elapsed_min < min_hold:
+                pass  # too early for secure profit evaluation
+            else:
+                secure = self._evaluate_secure_profit(
+                    position=position,
+                    current_price=current_price,
+                    current_profit=current_profit,
+                    profit_pips=profit_pips,
+                    trend_result=trend_result,
+                    regime_result=regime_result,
+                    confidence=confidence,
+                    multi_tf_trends=multi_tf_trends or {},
+                    momentum_result=momentum_result or {},
+                    vol_result=vol_result or {},
+                    rsi=rsi,
+                    atr=atr,
+                    is_buy=is_buy,
+                    entry=entry,
+                )
+                if secure["should_close"]:
+                    action = PositionAction.FULL_CLOSE
+                    reasons.append(secure["reason"])
+                    close_profit_score = secure["score"]
 
         return {
             "action": action,

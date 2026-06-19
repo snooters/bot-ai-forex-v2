@@ -77,7 +77,7 @@ class PositionSizer:
         tier_risk_pct = self.get_balance_tier_risk_pct(balance)
         effective_risk = min(risk_pct, tier_risk_pct)
         risk_amount = balance * effective_risk * volatility_multiplier * aggressiveness_mult
-        max_risk = balance * config.risk["max_risk_pct"] * 2
+        max_risk = balance * config.risk["max_risk_pct"]
         risk_amount = min(risk_amount, max_risk)
 
         contract_size = 100000

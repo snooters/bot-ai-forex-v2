@@ -140,6 +140,7 @@ class ForexBot:
         self._account_info: Dict = {}
         self._last_heartbeat_time = 0.0
         self._last_emergency_check: Dict = {}
+        self._equity_history: List[float] = []  # for web dashboard equity sparkline
 
 
     def _tf_to_minutes(self, tf: str) -> int:
@@ -190,6 +191,10 @@ class ForexBot:
                 "leverage": config.account["leverage"],
             }
 
+        # Seed equity history for web dashboard sparkline
+        initial_equity = self._account_info.get("equity", 0) or self._account_info.get("balance", 0) or config.account["balance"]
+        self._equity_history = [initial_equity]
+
         try:
             if self.data_engine.connector._mt5_available:
                 self.data_engine.connector.ensure_connected()
@@ -203,6 +208,16 @@ class ForexBot:
         all_ensembles = {}
         model_version: Optional[str] = None
         trained_tfs = self.model_manager.get_trained_timeframes()
+        
+        # ── Model inventory health check ──
+        version_count = len(self.model_manager.list_versions())
+        retrain_count = self.model_manager.get_total_retrains()
+        if retrain_count > 10 and version_count < retrain_count * 0.3:
+            self.logger.warning(
+                f"Model inventory anomaly: {version_count} versions on disk "
+                f"vs {retrain_count} total retrains. Some models may have been lost!"
+            )
+        
         if trained_tfs:
             model_version = self.model_manager.get_latest_version(trained_tfs[0])
             for tf in trained_tfs:
@@ -1322,17 +1337,40 @@ class ForexBot:
                         self.logger.warning(f"Failed to load fallback ensemble for {Timeframe.LABELS.get(tf, tf)}: {load_e}")
                     continue
 
-            keep_versions = set()
-            for tf_ in ensembles:
-                v = self.model_manager.get_latest_version(tf_)
+            # ── Safe cleanup: only delete rejected versions per-TF, protect best ones ──
+            # Build a map of TF -> the ACTUAL version loaded in ensembles
+            active_versions = {}  # TF label -> version string
+            for tf_, ensemble in ensembles.items():
+                v = getattr(ensemble, 'version', None)
                 if v:
-                    keep_versions.add(v)
+                    active_versions[Timeframe.LABELS.get(tf_, str(tf_))] = v
+                else:
+                    # Fallback: get latest but log warning
+                    v = self.model_manager.get_latest_version(tf_)
+                    if v:
+                        active_versions[Timeframe.LABELS.get(tf_, str(tf_))] = v
+                        self.logger.warning(f"  Cleanup: ensemble has no version attr for {Timeframe.LABELS.get(tf_, str(tf_))}, using latest={v}")
+            
+            # Filter rejected versions per-TF and skip protected ones
+            deleted_count = 0
             for v in set(rejected_versions):
-                if v and v not in keep_versions and v != "none":
-                    try:
-                        self.model_manager.delete_version(v)
-                    except Exception as del_e:
-                        self.logger.warning(f"Failed to delete rejected version {v}: {del_e}")
+                if not v or v == "none":
+                    continue
+                # Skip if this version is the active one for its TF
+                if v in active_versions.values():
+                    self.logger.debug(f"  Cleanup: skipping {v} (currently active)")
+                    continue
+                # Skip protected versions (production, golden, top-3 by OOS, recent self-learn)
+                if self.model_manager.is_version_protected(v):
+                    self.logger.debug(f"  Cleanup: skipping {v} (protected)")
+                    continue
+                try:
+                    self.model_manager.delete_version(v)
+                    deleted_count += 1
+                except Exception as del_e:
+                    self.logger.warning(f"Failed to delete rejected version {v}: {del_e}")
+            if deleted_count > 0:
+                self.logger.info(f"Cleanup: archived {deleted_count} rejected model versions")
 
             if ensembles:
                 self.ml_predictor = MLPredictor(ensembles)
@@ -1536,11 +1574,40 @@ class ForexBot:
         has_analysis = len(self._last_analysis) > 0
         uptime_sec = (datetime.now() - self._start_time).total_seconds()
         uptime_str = f"{int(uptime_sec//3600):02d}:{int((uptime_sec%3600)//60):02d}:{int(uptime_sec%60):02d}"
+        # ── Equity history for web dashboard sparkline ──
+        current_equity_val = self._account_info.get("equity", 0) or self._account_info.get("balance", 0)
+        self._equity_history.append(current_equity_val)
+        if len(self._equity_history) > 200:
+            self._equity_history = self._equity_history[-200:]
+
+        # ── Track month-start balance (persisted across restarts) ──
+        try:
+            _ms_path = Path("learning/trade_history/month_start.json")
+            _now = datetime.now()
+            _current_month = _now.month
+            _current_year = _now.year
+            _current_bal = self._account_info.get("balance", 0)
+            if _ms_path.is_file():
+                ms_data = json.loads(_ms_path.read_text())
+                if ms_data.get("month") == _current_month and ms_data.get("year") == _current_year:
+                    _month_start_balance = ms_data.get("balance", _current_bal)
+                else:
+                    # New month — save current balance as start
+                    _month_start_balance = _current_bal
+                    _ms_path.write_text(json.dumps({"month": _current_month, "year": _current_year, "balance": _current_bal}))
+            else:
+                _month_start_balance = _current_bal
+                _ms_path.parent.mkdir(parents=True, exist_ok=True)
+                _ms_path.write_text(json.dumps({"month": _current_month, "year": _current_year, "balance": _current_bal}))
+        except Exception:
+            _month_start_balance = self._account_info.get("balance", 0)
+
         state = {
             "analysis_ready": has_analysis,
             "uptime": uptime_str,
             "balance": self._account_info.get("balance", 0),
-            "equity": self._account_info.get("equity", 0),
+            "equity": current_equity_val,
+            "month_start_balance": _month_start_balance,
             "margin": self._account_info.get("margin", 0),
             "free_margin": self._account_info.get("margin_free", 0),
             "margin_level": self._account_info.get("margin_level", 0),
@@ -1689,6 +1756,9 @@ class ForexBot:
             }
             for t in self.trade_logger.get_closed_trades()[-5:]
         ]
+
+        # Equity curve for web dashboard sparkline (send as compact list)
+        state["equity_curve"] = self._equity_history[-100:]  # max 100 points
 
         # ── Web dashboard: broadcast full state + cache candles ──
         state["mode"] = config.account.get("trading_mode", "simulation")
@@ -2331,13 +2401,39 @@ async def cmd_self_learn(bot: ForexBot, args: argparse.Namespace):
         )
         if bot.model_trainer.get_ensemble().get_num_models() > 0:
             version = bot.model_manager.save_ensemble(
-                bot.model_trainer.get_ensemble(), timeframe=tf
+                bot.model_trainer.get_ensemble(), timeframe=tf,
+                source="self_learn",
             )
             # Save feature importance for this TF (used for pruning next retrain)
             bot.model_trainer.save_feature_importance(
                 bot.model_trainer.get_ensemble(), features, symbol, tf, version
             )
             bot.logger.info(f"  {tf_label}: model saved as v{version}")
+            
+            # ── Run OOS validation immediately so the model has a score ──
+            try:
+                oos_result = bot.oos_validator.validate(
+                    df=df, ensemble=bot.model_trainer.get_ensemble(),
+                    trainer=bot.model_trainer,
+                    timeframe_label=tf_label, oos_split=0.2,
+                    timeframe=tf,
+                )
+                bot.model_manager.save_oos_result(version, oos_result)
+                wr = oos_result.get("win_rate", 0)
+                pf = oos_result.get("profit_factor", 0)
+                grade = oos_result.get("grade", "N/A")
+                bot.logger.info(f"  {tf_label}: OOS validation — WR={wr:.1f}% PF={pf:.2f} Grade={grade}")
+            except Exception as e:
+                bot.logger.warning(f"  {tf_label}: OOS validation failed — {e}")
+            
+            # Save performance data
+            perf_acc = {}
+            for m_name in ["xgboost", "random_forest", "lightgbm", "lstm"]:
+                m_result = results.get("models", {}).get(m_name, {}) or {}
+                if isinstance(m_result, dict):
+                    perf_acc[m_name] = m_result.get("train_accuracy", 0) or 0
+                    perf_acc[f"{m_name}_val"] = m_result.get("val_accuracy", 0) or 0
+            bot.model_manager.save_performance(version, {"accuracy": perf_acc})
 
     bot.logger.info("Self-learn complete!")
     await bot.shutdown(reason="Self-learn complete")

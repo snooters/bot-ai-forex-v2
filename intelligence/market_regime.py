@@ -119,7 +119,14 @@ class MarketRegimeDetector:
         else:
             atr_spike = False
 
-        return vol_spike or atr_spike
+        # Require BOTH volume spike AND ATR spike to confirm news regime.
+        # Single condition (vol OR atr) is too sensitive — causes premature exit.
+        if vol_spike and atr_spike:
+            return True
+        # If only volume spikes but atr data is unavailable, require higher threshold
+        if vol_spike and "atr" not in df.columns:
+            return recent_vol > avg_vol * 3  # 3x instead of 2x
+        return False
 
     def _default_regime(self) -> Dict:
         return {

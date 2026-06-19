@@ -22,6 +22,7 @@ from utils.logger import get_logger
 PRODUCTION_DIR = "production"
 CANDIDATE_DIR = "candidate"
 ARCHIVE_DIR = "archive"
+PROTECTED_VERSIONS_COUNT = 3  # Top N versions per TF are protected from deletion
 
 
 class ModelManager:
@@ -54,7 +55,7 @@ class ModelManager:
     def _version_dir(self, version: str) -> Path:
         return self._model_dir / f"model_{version}"
 
-    def save_to_production(self, ensemble: VotingEnsemble, timeframe: int) -> str:
+    def save_to_production(self, ensemble: VotingEnsemble, timeframe: int, source: str = "auto_retrain") -> str:
         tf_label = self._tf_label(timeframe)
         tf_dir = self._production_dir / tf_label
         tf_dir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ class ModelManager:
             "timeframe": tf_label,
             "timeframe_minutes": timeframe,
             "created_at": datetime.now().isoformat(),
+            "source": source,
             "models": {},
         }
         if ensemble.feature_cols:
@@ -112,7 +114,7 @@ class ModelManager:
                 pass
         return None
 
-    def save_to_candidate(self, ensemble: VotingEnsemble, timeframe: int, source_version: str = "") -> str:
+    def save_to_candidate(self, ensemble: VotingEnsemble, timeframe: int, source_version: str = "", source: str = "auto_retrain") -> str:
         tf_label = self._tf_label(timeframe)
         tf_dir = self._candidate_dir / tf_label
         tf_dir.mkdir(parents=True, exist_ok=True)
@@ -124,6 +126,7 @@ class ModelManager:
             "timeframe": tf_label,
             "timeframe_minutes": timeframe,
             "source_version": source_version,
+            "source": source,
             "created_at": datetime.now().isoformat(),
             "models": {},
         }
@@ -365,7 +368,7 @@ class ModelManager:
 
         self.logger.info("No performance data for ensemble weighting — using uniform weights")
 
-    def save_ensemble(self, ensemble: VotingEnsemble, version: Optional[str] = None, timeframe: Optional[int] = None) -> str:
+    def save_ensemble(self, ensemble: VotingEnsemble, version: Optional[str] = None, timeframe: Optional[int] = None, source: str = "auto_retrain") -> str:
         if version is None:
             version = self._get_next_version(timeframe)
         version_dir = self._model_dir / f"model_{version}"
@@ -375,6 +378,7 @@ class ModelManager:
             "created_at": datetime.now().isoformat(),
             "timeframe": self._tf_label(timeframe) if timeframe else None,
             "timeframe_minutes": timeframe,
+            "source": source,
             "models": {},
         }
         if ensemble.feature_cols:
@@ -546,7 +550,44 @@ class ModelManager:
         comparison["b_better"] = sum(1 for v in comparison["details"].values() if v["better"] == "b")
         return comparison
 
+    def _get_persistent_next_version(self, timeframe: Optional[int] = None) -> int:
+        """Get the next version number from a persistent counter file.
+        
+        This prevents counter reset when model directories are deleted.
+        Falls back to directory scanning if counter file is missing.
+        """
+        counter_path = self._model_dir / "version_counter.json"
+        key = self._tf_label(timeframe) if timeframe else "default"
+        counter = {}
+        if counter_path.exists():
+            try:
+                with open(counter_path) as f:
+                    counter = json.load(f)
+            except Exception:
+                pass
+        next_num = counter.get(key, 0) + 1
+        counter[key] = next_num
+        try:
+            with open(counter_path, "w") as f:
+                json.dump(counter, f, indent=2)
+        except Exception:
+            pass
+        return next_num
+
     def _get_next_version(self, timeframe: Optional[int] = None) -> str:
+        # Try persistent counter first
+        try:
+            next_num = self._get_persistent_next_version(timeframe)
+        except Exception:
+            next_num = 0
+        
+        if next_num > 0:
+            base = f"v{next_num}"
+            if timeframe is not None:
+                base += f"_{self._tf_label(timeframe)}"
+            return base
+        
+        # Fallback to directory scanning
         versions = self.list_versions(timeframe)
         nums = []
         for v in versions:
@@ -1019,11 +1060,104 @@ class ModelManager:
         }
         return summary
 
-    def delete_version(self, version: str):
+    @staticmethod
+    def is_protected_version(version: str) -> bool:
+        """Check if a version string is a protected/production version."""
+        return version.startswith("prod_") or version.startswith("golden_") or version.startswith("archive_")
+
+    def _extract_timeframe_from_version(self, version: str) -> Optional[int]:
+        """Extract timeframe minutes from version string (e.g., 'v3_M5' -> 5)."""
+        parts = version.split("_")
+        if len(parts) >= 2:
+            tf_label = parts[-1]
+            for val, label in Timeframe.LABELS.items():
+                if label == tf_label:
+                    return val
+        return None
+
+    def is_version_protected(self, version: str, timeframe: Optional[int] = None) -> bool:
+        """Check if a version is protected from deletion.
+        
+        Protected versions include:
+        - Production versions (prod_*)
+        - Golden/fallback versions (golden_*)
+        - Top N best versions per TF by OOS score
+        - Self-learn models created in the last 24 hours
+        """
+        # Static protection by name pattern
+        if self.is_protected_version(version):
+            return True
+        
+        # Auto-detect timeframe from version string if not provided
+        if timeframe is None:
+            timeframe = self._extract_timeframe_from_version(version)
+        
+        # Check metadata for source=self_learn — protect for 24h
+        meta = self._load_metadata(version)
+        if meta:
+            source = meta.get("source", "")
+            if source == "self_learn":
+                created_str = meta.get("created_at", "")
+                if created_str:
+                    try:
+                        created = datetime.fromisoformat(created_str)
+                        age_hours = (datetime.now() - created).total_seconds() / 3600
+                        if age_hours < 24:
+                            return True
+                    except Exception:
+                        pass
+        
+        # Check if version is in top N protected versions for this TF
+        if timeframe is not None:
+            # Cache protected versions lookup to avoid repeated scanning
+            cache_key = f"protected_{timeframe}"
+            if not hasattr(self, '_protected_cache'):
+                self._protected_cache = {}
+            if cache_key not in self._protected_cache:
+                self._protected_cache[cache_key] = set(self.get_protected_versions(timeframe))
+            if version in self._protected_cache[cache_key]:
+                return True
+        
+        return False
+
+    def get_protected_versions(self, timeframe: int) -> List[str]:
+        """Get the top N protected versions for a timeframe based on OOS score."""
+        versions = self.list_versions(timeframe)
+        scored = []
+        for v in versions:
+            oos = self.get_oos_result(v)
+            score = self._compute_oos_numeric_score(oos)
+            if score > 0:
+                scored.append((v, score))
+        scored.sort(key=lambda x: -x[1])  # descending by score
+        return [v for v, _ in scored[:PROTECTED_VERSIONS_COUNT]]
+
+    def delete_version(self, version: str, archive: bool = True, force: bool = False):
+        """Delete or archive a model version.
+        
+        Args:
+            version: The version string (e.g. 'v3_M5')
+            archive: If True, move to archive/ instead of permanent deletion.
+            force: If True, bypass protection check.
+        """
         version_dir = self._model_dir / f"model_{version}"
-        if version_dir.exists():
-            shutil.rmtree(version_dir)
-            self.logger.info(f"Deleted model version {version}")
+        if not version_dir.exists():
+            return
+        if not force and self.is_version_protected(version):
+            self.logger.warning(f"Version {version} is protected — skipping deletion")
+            return
+        if archive:
+            archive_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            archive_dest = self._archive_dir / "deleted" / f"{version}_{archive_ts}"
+            archive_dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(version_dir), str(archive_dest))
+                self.logger.info(f"Archived model version {version} -> {archive_dest}")
+                return
+            except Exception as e:
+                self.logger.warning(f"Archive failed for {version}, falling back to delete: {e}")
+        shutil.rmtree(version_dir)
+        self.logger.info(f"Deleted model version {version}")
 
     def get_retrain_counts(self) -> Dict:
         return self._load_retrain_counts()

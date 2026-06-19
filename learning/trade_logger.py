@@ -188,9 +188,14 @@ class TradeLogger:
             for d in group_deals:
                 etype = d.get("entry", -1)
                 deal_type = d.get("type", -1)
-                if etype in (0, 1) and deal_type in (0, 1):
+                if etype == 0 and deal_type in (0, 1):  # DEAL_ENTRY_IN → entry
                     entry_deal = d
-                elif etype in (2, 3):
+                elif etype == 1 and deal_type in (0, 1):  # DEAL_ENTRY_OUT → exit
+                    exit_deal = d
+                    total_profit += d.get("profit", 0) or 0
+                    total_swap += d.get("swap", 0) or 0
+                    total_commission += d.get("commission", 0) or 0
+                elif etype in (2, 3):  # DEAL_ENTRY_INOUT / DEAL_ENTRY_OUT_BY → exit
                     exit_deal = d  # keep last exit deal for price/timestamp
                     total_profit += d.get("profit", 0) or 0
                     total_swap += d.get("swap", 0) or 0
