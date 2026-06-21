@@ -1,0 +1,33 @@
+{
+  "oos": {
+    "success": true,
+    "train_samples": 41808,
+    "val_accuracy": 0.9705324254939167,
+    "total_trades": 7419,
+    "winning_trades": 7269,
+    "losing_trades": 150,
+    "win_rate": 97.98,
+    "accuracy": 95.06,
+    "non_hold_accuracy": 97.98,
+    "directional_predictions": 7424,
+    "hold_predictions": 1536,
+    "profit_factor": 68571.8023,
+    "sharpe_ratio": 107.3542,
+    "max_drawdown_pct": -0.0,
+    "net_profit": 2940238.27,
+    "avg_win": 400.64,
+    "avg_loss": -0.54,
+    "avg_win_loss_ratio": 738.13,
+    "oos_samples": 8960,
+    "timeframe": "M15",
+    "split": {
+      "train": 41808,
+      "val": 8959,
+      "test": 8960
+    },
+    "validated_at": "2026-06-04T15:54:24.682284",
+    "passed": true,
+    "grade": "A"
+  },
+  "oos_score": 90
+}

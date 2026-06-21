@@ -1,0 +1,15 @@
+{
+  "oos": {
+    "success": false,
+    "reason": "prediction failed: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (4,) + inhomogeneous part.",
+    "total_trades": 0,
+    "win_rate": 0,
+    "accuracy": 0,
+    "profit_factor": 0,
+    "sharpe_ratio": 0,
+    "max_drawdown_pct": 0,
+    "grade": "N/A",
+    "passed": false
+  },
+  "oos_score": 0
+}

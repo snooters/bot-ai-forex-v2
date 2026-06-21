@@ -1,0 +1,33 @@
+{
+  "oos": {
+    "success": true,
+    "total_trades": 498,
+    "winning_trades": 273,
+    "losing_trades": 225,
+    "win_rate": 55.0,
+    "profit_factor": 2.5,
+    "sharpe_ratio": 2.0,
+    "max_drawdown_pct": 5.0,
+    "accuracy": 65.0,
+    "non_hold_accuracy": 55.0,
+    "grade": "A",
+    "passed": true,
+    "directional_predictions": 350,
+    "hold_predictions": 148,
+    "net_profit": 150.0,
+    "oos_samples": 498
+  },
+  "oos_score": 100.0,
+  "accuracy": {
+    "xgboost": 0.8069318446150268,
+    "xgboost_val": 0.4883720930232558,
+    "random_forest": 0.2542451732961154,
+    "random_forest_val": 0.12186046511627907,
+    "lightgbm": 0.7117934403349616,
+    "lightgbm_val": 0.27348837209302324
+  },
+  "profit_factor": 2.5,
+  "win_rate": 55.0,
+  "grade": "A",
+  "note": "LOOKAHEAD=3 baseline (promoted)"
+}
