@@ -131,3 +131,106 @@ def safe_float_division(a: float, b: float, default: float = 0.0) -> float:
     if abs(b) < 1e-10:
         return default
     return a / b
+
+
+# ── Simulation-based trade outcome ──────────────────────────────────────────
+# Used by OOSValidator and WalkForwardValidator to produce realistic P&L
+# instead of simple return-based calculations.
+
+SIM_TRADE_MAX_BARS = 72          # Max lookahead candles (12h at M5)
+SIM_TRADE_VOLUME = 0.01          # Standard mini lot
+SIM_TRADE_SL_ATR = 1.0           # SL = 1 × ATR
+SIM_TRADE_TP_ATR = 2.0           # TP1 = 2 × ATR
+SIM_TRADE_COMMISSION_RATE = 0.00006
+
+
+def simulate_trade_outcome(
+    df: pd.DataFrame,
+    row_idx: int,
+    predicted_dir: str,
+    atr_col: str = "atr",
+) -> Optional[Dict]:
+    """Simulate a single trade with SL/TP scanning forward.
+    
+    Uses SL=1×ATR, TP1=2×ATR to calculate realistic P&L, matching the
+    Simulator engine's logic. Returns a dict with keys:
+        profit, entry_price, exit_price, exit_reason, win
+    
+    Returns None if trade cannot be simulated (invalid ATR, no future data).
+    """
+    if row_idx < 0 or row_idx >= len(df):
+        return None
+
+    entry_row = df.iloc[row_idx]
+    entry_price = float(entry_row["close"])
+    atr = float(entry_row.get(atr_col, 0))
+
+    # Guard: ATR must be positive and reasonable
+    if atr <= 0 or atr > entry_price * 0.1:
+        return None
+
+    # Calculate SL and TP (same as simulator.py:_execute_trade)
+    if predicted_dir == "BUY":
+        sl_price = entry_price - atr * SIM_TRADE_SL_ATR
+        tp_price = entry_price + atr * SIM_TRADE_TP_ATR
+    else:  # SELL
+        sl_price = entry_price + atr * SIM_TRADE_SL_ATR
+        tp_price = entry_price - atr * SIM_TRADE_TP_ATR
+
+    # Scan forward up to SIM_TRADE_MAX_BARS to find which is hit first
+    end_idx = min(len(df), row_idx + SIM_TRADE_MAX_BARS)
+    exit_price = None
+    exit_reason = None
+
+    for j in range(row_idx + 1, end_idx):
+        future_row = df.iloc[j]
+        high = float(future_row["high"])
+        low = float(future_row["low"])
+
+        if predicted_dir == "BUY":
+            if high >= tp_price:
+                exit_price = tp_price
+                exit_reason = "TP_HIT"
+                break
+            if low <= sl_price:
+                exit_price = sl_price
+                exit_reason = "SL_HIT"
+                break
+        else:  # SELL
+            if low <= tp_price:
+                exit_price = tp_price
+                exit_reason = "TP_HIT"
+                break
+            if high >= sl_price:
+                exit_price = sl_price
+                exit_reason = "SL_HIT"
+                break
+
+    # If neither SL nor TP was hit within the window, close at last price
+    if exit_price is None:
+        exit_price = float(df.iloc[end_idx - 1]["close"])
+        exit_reason = "TIME_EXIT"
+
+    # Calculate P&L (matches VirtualPosition.calculate_pnl)
+    if predicted_dir == "BUY":
+        pnl = (exit_price - entry_price) * SIM_TRADE_VOLUME * 100000
+    else:
+        pnl = (entry_price - exit_price) * SIM_TRADE_VOLUME * 100000
+
+    # Subtract commission (matches VirtualAccount._calc_commission)
+    commission = SIM_TRADE_VOLUME * 100000 * entry_price * SIM_TRADE_COMMISSION_RATE
+    net_pnl = pnl - commission
+
+    # Determine if this was a winning trade
+    if predicted_dir == "BUY":
+        is_win = exit_price > entry_price
+    else:
+        is_win = exit_price < entry_price
+
+    return {
+        "profit": net_pnl,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "exit_reason": exit_reason,
+        "win": is_win,
+    }

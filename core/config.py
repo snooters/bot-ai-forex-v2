@@ -74,6 +74,7 @@ class Config:
                 "allow_no_trade": self._get_bool("ALLOW_NO_TRADE", True),
                 "max_spread_pips": self._get_float("MAX_SPREAD_PIPS", 2.0),
                 "counter_trade_min_confidence": self._get_float("COUNTER_TRADE_MIN_CONFIDENCE", 0.60),
+                "buy_bias_correction": self._get_float("BUY_BIAS_CORRECTION", 1.2),
             },
             "learning": {
                 "enabled": self._get_bool("ENABLE_SELF_LEARNING", True),

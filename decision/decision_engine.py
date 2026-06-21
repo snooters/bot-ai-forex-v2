@@ -201,7 +201,7 @@ class DecisionEngine:
             min_conf = max(0.50, dynamic_min)
             # In simulation mode, use much lower threshold to generate more trades
             if self.simulation_mode:
-                min_conf = 0.20
+                min_conf = 0.50
 
             if confidence >= min_conf and confidence < 0.70:
                 trade_type = "WEAK_SIGNAL"
@@ -245,7 +245,11 @@ class DecisionEngine:
 
                 counter_trend_min_conf = config.ai_filter.get("counter_trade_min_confidence", 0.60)
 
-                if combined_buy > combined_sell:
+                # Compensate for model's SELL prediction bias (80% SELL vs 20% BUY).
+                # 1.2x means "prefer BUY when buy_prob is within 20% of sell_prob".
+                buy_bias = config.ai_filter.get("buy_bias_correction", 1.2)
+
+                if combined_buy * buy_bias > combined_sell:
                     if self._validate_entry(direction="BUY", confidence=confidence,
                                             trend_result=trend_result, sr_info=sr_info, df=df,
                                             multi_tf_trends=multi_tf_trends, reasons=decision["reasons"]):
@@ -263,7 +267,7 @@ class DecisionEngine:
                         if direction_bias:
                             decision["reasons"].append(f"BUY validation failed, weak {direction_bias} bias")
 
-                elif combined_sell > combined_buy:
+                elif combined_sell > combined_buy * buy_bias:
                     if self._validate_entry(direction="SELL", confidence=confidence,
                                             trend_result=trend_result, sr_info=sr_info, df=df,
                                             multi_tf_trends=multi_tf_trends, reasons=decision["reasons"]):
@@ -286,7 +290,8 @@ class DecisionEngine:
                     decision["no_trade_reasons"].append("Combined signal equal - HOLD")
 
             # ── Trend-based direction override (ML-gated) ──
-            if not decision["no_trade"]:
+            # In simulation mode, skip trend override to test raw ML performance
+            if not decision["no_trade"] and not self.simulation_mode:
                 trend_dir = trend_result.get("direction", "")
                 current_action = decision.get("action", TradeDirection.HOLD.value)
                 ml_buy_prob = ml_signal.get("buy_prob", 0)

@@ -13,7 +13,7 @@ from ml.ensemble import VotingEnsemble
 from ml.trainer import ModelTrainer
 from utils.helpers import (
     compute_sharpe_ratio, compute_profit_factor,
-    compute_max_drawdown,
+    compute_max_drawdown, simulate_trade_outcome,
 )
 from utils.logger import get_logger
 
@@ -287,26 +287,12 @@ class WalkForwardValidator:
 
             directional_preds += 1
             row_idx = len(df) - len(y_true) + i
-            if 0 <= row_idx < len(df) and row_idx + LOOKAHEAD_5 < len(df):
-                entry_price = float(df.iloc[row_idx]["close"])
-                future_price = float(df.iloc[row_idx + LOOKAHEAD_5]["close"])
 
-                if predicted_dir == "BUY":
-                    profit_pips = (future_price - entry_price) / 0.0001
-                else:
-                    profit_pips = (entry_price - future_price) / 0.0001
-
-                profit = profit_pips * 0.10
-
-                trade_signals.append({
-                    "predicted": predicted_dir,
-                    "actual": actual_dir,
-                    "win": correct_dir,
-                    "profit": profit,
-                    "profit_pips": profit_pips,
-                    "entry_price": entry_price,
-                    "exit_price": future_price,
-                })
+            # Use simulation-based trade outcome (matches OOSValidator)
+            if row_idx + 1 < len(df):  # Need at least 1 bar of future data
+                trade_result = simulate_trade_outcome(df, row_idx, predicted_dir)
+                if trade_result is not None:
+                    trade_signals.append(trade_result)
 
         total_trades = len(trade_signals)
         non_hold_correct = sum(1 for t in trade_signals if t["win"])
@@ -343,7 +329,7 @@ class WalkForwardValidator:
         sharpe = compute_sharpe_ratio(profits_list)
 
         equity = []
-        running = 0.0
+        running = 10000.0  # Initial balance for realistic DD calculation
         for t in trade_signals:
             running += t["profit"]
             equity.append(running)

@@ -260,7 +260,15 @@ class ModelTrainer:
         )
         return X_merged, y_merged, w_merged
 
-    def _compute_sample_weights(self, y: np.ndarray, multiplier: float = 1.0) -> np.ndarray:
+    def _compute_sample_weights(self, y: np.ndarray, multiplier: float = 1.0,
+                                 buy_class_multiplier: float = 1.5) -> np.ndarray:
+        """Compute inverse-frequency sample weights with optional BUY class boost.
+
+        Args:
+            multiplier: Extra weight for all trading classes (BUY=0, SELL=1) vs HOLD=2.
+            buy_class_multiplier: Extra multiplier for BUY samples only.
+                                  >1.0 penalises false SELL predictions more during training.
+        """
         classes, counts = np.unique(y, return_counts=True)
         n_samples = len(y)
         n_classes = len(classes)
@@ -270,8 +278,11 @@ class ModelTrainer:
             base_weight = n_samples / (n_classes * count)
             if cls in (0, 1):
                 base_weight *= multiplier
+            if cls == 0:
+                base_weight *= buy_class_multiplier
             weights[cls_mask] = base_weight
-        self.logger.info(f"Sample weights computed (multiplier={multiplier}): "
+        self.logger.info(f"Sample weights computed (multiplier={multiplier}, "
+                         f"buy_class_multiplier={buy_class_multiplier}): "
                          f"classes={dict(zip(classes, counts))}, "
                          f"weight_range=[{weights.min():.2f}, {weights.max():.2f}]")
         return weights
@@ -303,7 +314,8 @@ class ModelTrainer:
                          recency_weights: Optional[np.ndarray] = None,
                          trade_outcome_weights: Optional[np.ndarray] = None,
                          existing_ensemble: Optional[VotingEnsemble] = None,
-                         is_warm_start: bool = False) -> Dict:
+                         is_warm_start: bool = False,
+                         buy_class_multiplier: float = 1.5) -> Dict:
         """Train all enabled models with optional warm-start from existing ensemble.
         
         Args:
@@ -322,7 +334,10 @@ class ModelTrainer:
         X_train, X_val = X[:split_idx], X[split_idx:]
         y_train, y_val = y_effective[:split_idx], y_effective[split_idx:]
 
-        sample_weight = self._compute_sample_weights(y_train, multiplier=sample_weight_multiplier)
+        sample_weight = self._compute_sample_weights(
+            y_train, multiplier=sample_weight_multiplier,
+            buy_class_multiplier=buy_class_multiplier,
+        )
 
         # ── Defensive alignment: recency_weights & trade_outcome_weights ──
         # These can be shorter than X after merge_with_ohlc() appends sim trade

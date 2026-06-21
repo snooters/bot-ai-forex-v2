@@ -1,8 +1,9 @@
 {
   "version": "v1_M15",
-  "created_at": "2026-06-19T07:26:48.535532",
+  "created_at": "2026-06-20T11:34:17.759234",
   "timeframe": "M15",
   "timeframe_minutes": 15,
+  "source": "self_learn",
   "models": {
     "xgboost": {
       "path": "models\\model_v1_M15\\xgboost.ubj",

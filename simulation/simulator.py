@@ -335,7 +335,7 @@ class Simulator:
             tp=tp1_price,
             atr_entry=atr,
             comment=f"sim_{side}_{self._total_candles_processed}",
-            trailing_activated=False,
+            trailing_activated=True,
         )
 
         if pos:

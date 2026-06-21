@@ -11,7 +11,7 @@ from ml.ensemble import VotingEnsemble
 from ml.trainer import ModelTrainer
 from utils.helpers import (
     compute_sharpe_ratio, compute_profit_factor,
-    compute_max_drawdown,
+    compute_max_drawdown, simulate_trade_outcome,
 )
 from utils.logger import get_logger
 
@@ -222,6 +222,18 @@ class OOSValidator:
         y_true = y_true[mask]
         return y_true, X
 
+    def _simulate_trade(
+        self,
+        df: pd.DataFrame,
+        row_idx: int,
+        predicted_dir: str,
+    ) -> Optional[Dict]:
+        """Simulate a single trade with SL/TP scanning forward.
+        
+        Delegates to shared simulate_trade_outcome() in utils.helpers.
+        """
+        return simulate_trade_outcome(df, row_idx, predicted_dir)
+
     def _run_test(self, X: np.ndarray, y_true: np.ndarray, preds: np.ndarray, df: pd.DataFrame) -> Dict:
         correct = (preds == y_true).sum()
         accuracy = float(correct / len(y_true)) if len(y_true) > 0 else 0
@@ -249,24 +261,12 @@ class OOSValidator:
 
             directional_preds += 1
             row_idx = len(df) - len(y_true) + i
-            if 0 <= row_idx < len(df) and row_idx + LOOKAHEAD_5 < len(df):
-                entry_price = float(df.iloc[row_idx]["close"])
-                future_price = float(df.iloc[row_idx + LOOKAHEAD_5]["close"])
-                price_return = (future_price - entry_price) / entry_price
 
-                if predicted_dir == "BUY":
-                    profit = price_return * 10000
-                else:
-                    profit = -price_return * 10000
-
-                trade_signals.append({
-                    "predicted": predicted_dir,
-                    "actual": actual_dir,
-                    "win": correct_dir,
-                    "profit": profit,
-                    "entry_price": entry_price,
-                    "exit_price": future_price,
-                })
+            # Use simulation-based trade outcome instead of return-based calculation
+            if row_idx + 1 < len(df):  # Need at least 1 bar of future data
+                trade_result = self._simulate_trade(df, row_idx, predicted_dir)
+                if trade_result is not None:
+                    trade_signals.append(trade_result)
 
         total_trades = len(trade_signals)
         non_hold_correct = sum(1 for t in trade_signals if t["win"])
@@ -303,7 +303,7 @@ class OOSValidator:
         sharpe = compute_sharpe_ratio(profits_list)
 
         equity = []
-        running = 0.0
+        running = 10000.0  # Initial balance for realistic DD calculation
         for t in trade_signals:
             running += t["profit"]
             equity.append(running)
@@ -431,13 +431,14 @@ class OOSValidator:
     def _cap_results(self, result: Dict) -> Dict:
         """Cap unrealistic OOS metrics to prevent overfitting illusion."""
         if result.get("success"):
-            # Capped at realistic maximums for forex
-            # Higher caps allow model differentiation (all models hit 5.0 before)
             result["win_rate"] = min(result.get("win_rate", 0), 75.0)
             result["profit_factor"] = min(result.get("profit_factor", 0), 50.0)
             result["sharpe_ratio"] = min(result.get("sharpe_ratio", 0), 10.0)
             result["non_hold_accuracy"] = min(result.get("non_hold_accuracy", 0), 80.0)
             result["accuracy"] = min(result.get("accuracy", 0), 85.0)
+            # Cap DD at -100% max for display (equity can't lose more than 100%)
+            raw_dd = result.get("max_drawdown_pct", 0)
+            result["max_drawdown_pct"] = max(raw_dd, -100.0)
         return result
 
     def _empty_result(self, reason: str = "unknown") -> Dict:
