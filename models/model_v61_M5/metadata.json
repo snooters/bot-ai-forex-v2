@@ -1,0 +1,58 @@
+{
+  "version": "v61_M5",
+  "created_at": "2026-06-27T01:33:37.555001",
+  "timeframe": "M5",
+  "timeframe_minutes": 5,
+  "source": "auto_retrain",
+  "models": {
+    "xgboost": {
+      "path": "models\\model_v61_M5\\xgboost.ubj",
+      "trained": true
+    },
+    "random_forest": {
+      "path": "models\\model_v61_M5\\random_forest.ubj",
+      "trained": true
+    },
+    "lightgbm": {
+      "path": "models\\model_v61_M5\\lightgbm.ubj",
+      "trained": true
+    }
+  },
+  "feature_cols": [
+    "close_vs_ema2030",
+    "pullback_to_ema50_60",
+    "momentum30",
+    "rsi",
+    "ema_cross60",
+    "rsi15",
+    "momentum15",
+    "rsi30",
+    "hour",
+    "momentum60",
+    "ema_slope_20",
+    "pullback_to_ema50_240",
+    "bb_pct",
+    "volatility60",
+    "volatility240",
+    "mtf_alignment",
+    "ema_cross240",
+    "hl_range",
+    "bb_width",
+    "returns",
+    "rsi60",
+    "atr",
+    "stoch_k",
+    "volatility",
+    "ema_cross",
+    "ema_slope_50",
+    "macd",
+    "momentum_10",
+    "atr240",
+    "cci",
+    "mass_index",
+    "momentum_20",
+    "macd_histogram",
+    "atr60",
+    "stoch_cross"
+  ]
+}

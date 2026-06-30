@@ -34,5 +34,8 @@
     "price_pos_vs_ema20",
     "m30_close_vs_h4_ema20",
     "h1_rsi"
-  ]
+  ],
+  "version": "ensemble_v2_h4_v1",
+  "type": "ensemble_v2",
+  "source": "auto_train"
 }

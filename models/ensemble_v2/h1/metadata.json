@@ -32,5 +32,8 @@
     "session_london",
     "session_overlap",
     "adx"
-  ]
+  ],
+  "version": "ensemble_v2_h1_v1",
+  "type": "ensemble_v2",
+  "source": "auto_train"
 }

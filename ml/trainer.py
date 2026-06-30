@@ -24,11 +24,12 @@ from utils.decorators import measure_time, safe_execute
 # from the 135:5000 feature:sample ratio. Previous attempt at 40 was too aggressive
 # (v33_M5 era), but with 581 sim trades + recency weighting, 50 is a reasonable target.
 #
-# IMPORTANT: _load_feature_importance() now SKIPS biased versions (<100 features)
-# to break the chicken-and-egg cycle that previously dropped multi-TF features
-# permanently. Only full-feature importance (e.g. v44_M5 with 135 features) is
-# used for selection, ensuring multi-TF features get a fair ranking.
-MAX_FEATURES_TARGET = 50
+# Feature pruning: _load_feature_importance() prefers the most recent version
+# with >= 30 non-zero features. MAX_FEATURES_TARGET controls how many top
+# features are kept. Multi-TF context features are included if they earn their
+# rank; if they score 0 importance across recent models they are dropped.
+MIN_FEATURE_IMPORTANCE = 1.0   # features below this are dropped unconditionally
+MAX_FEATURES_TARGET = 35       # keep top N features by importance
 
 
 class ModelTrainer:
@@ -59,13 +60,12 @@ class ModelTrainer:
             return None
 
     def _load_feature_importance(self, pair: str, timeframe: int) -> Optional[Dict[str, float]]:
-        """Load saved feature importance from training run.
+        """Load saved feature importance from the most recent training run.
 
-        Prefers the version with the MOST NON-ZERO features to break the
-        iterative selection bias cycle. Biased versions (e.g. v60_M5 with
-        only 49 non-zero features) are skipped in favour of full-feature
-        versions (e.g. v44_M5 with 125 non-zero features), ensuring that
-        multi-TF features get a fair ranking in the selection process.
+        Prefers the MOST RECENT version with >= 30 non-zero features.
+        This ensures the selection adapts to the latest model's learned importance
+        rather than getting stuck on stale full-feature archives.
+        Versions with < 30 non-zero features are considered too sparse to be reliable.
         """
         try:
             results_dir = Path(RESULTS_DIR) / pair / str(timeframe)
@@ -73,36 +73,49 @@ class ModelTrainer:
                 return None
 
             versions = sorted(results_dir.iterdir(), reverse=True)
-            best_fi = None
-            best_nz = 0  # track non-zero feature count
-            best_total = 0
+            MIN_NZ = 30  # minimum non-zero features for a version to be usable
 
             for v_dir in versions:
                 fi_file = v_dir / "feature_importance.csv"
-                if fi_file.exists():
+                if not fi_file.exists():
+                    continue
+                try:
                     fi_df = pd.read_csv(fi_file)
-                    if "feature" in fi_df.columns and "importance" in fi_df.columns:
-                        fi_dict = dict(zip(fi_df["feature"], fi_df["importance"]))
-                        nz = sum(1 for v in fi_dict.values() if v > 0)
-                        total = len(fi_dict)
+                except Exception:
+                    continue
+                if "feature" not in fi_df.columns or "importance" not in fi_df.columns:
+                    continue
+                fi_dict = dict(zip(fi_df["feature"], fi_df["importance"]))
+                nz = sum(1 for v in fi_dict.values() if v > 0)
+                total = len(fi_dict)
 
-                        # Prefer version with most non-zero features
-                        # (full-feature runs like v44_M5 have 125/135 non-zero;
-                        #  biased runs have <50 non-zero)
-                        if nz > best_nz:
-                            best_fi = (fi_dict, fi_file, total, nz)
-                            best_nz = nz
-                            best_total = total
+                # Accept first version (most recent) with enough non-zero features
+                if nz >= MIN_NZ:
+                    self.logger.info(
+                        f"Loaded feature importance from {fi_file} "
+                        f"({nz}/{total} non-zero features) — recent version"
+                    )
+                    return fi_dict
 
-            if best_fi:
-                fi_dict, fi_file, total, nz = best_fi
-                level = "info" if nz >= 100 else "warning"
-                getattr(self.logger, level)(
-                    f"Loaded feature importance from {fi_file} "
-                    f"({nz}/{total} non-zero features) — "
-                    f"{'unbiased' if nz >= 100 else 'biased'} selection"
-                )
-                return fi_dict
+            # Fallback: any version with at least some non-zero features
+            for v_dir in versions:
+                fi_file = v_dir / "feature_importance.csv"
+                if not fi_file.exists():
+                    continue
+                try:
+                    fi_df = pd.read_csv(fi_file)
+                except Exception:
+                    continue
+                if "feature" not in fi_df.columns or "importance" not in fi_df.columns:
+                    continue
+                fi_dict = dict(zip(fi_df["feature"], fi_df["importance"]))
+                nz = sum(1 for v in fi_dict.values() if v > 0)
+                if nz > 0:
+                    self.logger.warning(
+                        f"Loaded feature importance from {fi_file} "
+                        f"({nz} non-zero features) — fallback (sparse)"
+                    )
+                    return fi_dict
 
             return None
         except Exception as e:
@@ -114,9 +127,11 @@ class ModelTrainer:
         available_cols: List[str],
         importance: Optional[Dict[str, float]],
         max_features: int = MAX_FEATURES_TARGET,
+        min_importance: float = MIN_FEATURE_IMPORTANCE,
     ) -> List[str]:
-        """Select top N features by importance. Falls back to all if no importance data.
+        """Select top N features by importance, dropping near-zero-importance features.
 
+        Features with importance < min_importance are pruned unconditionally.
         If NEW features are detected (not in importance dict), ALL features are used
         so the new features get properly evaluated and ranked.
         """
@@ -137,16 +152,31 @@ class ModelTrainer:
         scored = [(col, importance.get(col, 0.0)) for col in available_cols]
         scored.sort(key=lambda x: x[1], reverse=True)
 
-        if len(scored) <= max_features:
-            self.logger.info(f"Only {len(scored)} features available — using all")
-            return available_cols
+        # Prune: unconditionally drop features below minimum importance
+        pruned = [(col, imp) for col, imp in scored if imp >= min_importance]
+        n_pruned = len(scored) - len(pruned)
+        if n_pruned > 0:
+            pruned_names = [col for col, imp in scored if imp < min_importance]
+            self.logger.info(
+                f"Pruned {n_pruned} features below min_importance={min_importance}: "
+                f"{', '.join(pruned_names[:10])}"
+                f"{'...' if len(pruned_names) > 10 else ''}"
+            )
 
-        selected = [col for col, _ in scored[:max_features]]
-        dropped = len(available_cols) - len(selected)
-        dropped_names = [col for col, _ in scored[max_features:]]
+        if len(pruned) <= max_features:
+            selected = [col for col, _ in pruned]
+            self.logger.info(
+                f"Feature selection: {len(selected)}/{len(available_cols)} features kept "
+                f"(min_importance={min_importance}, no top-N truncation needed)"
+            )
+            return selected
+
+        selected = [col for col, _ in pruned[:max_features]]
+        dropped = len(pruned) - len(selected)
+        dropped_names = [col for col, _ in pruned[max_features:]]
         self.logger.info(
             f"Feature selection: {len(selected)}/{len(available_cols)} features kept "
-            f"(dropped {dropped} low-importance features)"
+            f"(dropped {dropped} low-importance features after pruning)"
         )
         if dropped_names:
             self.logger.info(

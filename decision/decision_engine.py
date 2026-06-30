@@ -81,7 +81,7 @@ class DecisionEngine:
         pair_skill_score: Optional[float] = None,
     ) -> Dict:
         entry_tfs = list(df_entry.keys()) if isinstance(df_entry, dict) else []
-        entry_tf = timeframe or (entry_tfs[0] if entry_tfs else Timeframe.M15)
+        entry_tf = timeframe or (entry_tfs[0] if entry_tfs else Timeframe.M5)
         df = df_entry[entry_tf] if isinstance(df_entry, dict) else df_entry
 
         decision = {
@@ -89,6 +89,7 @@ class DecisionEngine:
             "action": TradeDirection.HOLD.value,
             "confidence": 0.0,
             "market_score": 0,
+            "timeframe": Timeframe.LABELS.get(entry_tf, "M5"),
             "reasons": [],
             "no_trade": True,
             "no_trade_reasons": [],
@@ -245,9 +246,10 @@ class DecisionEngine:
 
                 counter_trend_min_conf = config.ai_filter.get("counter_trade_min_confidence", 0.60)
 
-                # Compensate for model's SELL prediction bias (80% SELL vs 20% BUY).
-                # 1.2x means "prefer BUY when buy_prob is within 20% of sell_prob".
-                buy_bias = config.ai_filter.get("buy_bias_correction", 1.2)
+                # FIXED: Removed artificial BUY bias (was 1.2, causing 85% BUY trades with 15.7% WR).
+                # Data showed the 1.2x correction overcorrected massively — 85% of trades were BUY with terrible results.
+                # Now neutral (1.0). Market/ML probabilities decide direction, not hardcoded bias.
+                buy_bias = config.ai_filter.get("buy_bias_correction", 1.0)
 
                 if combined_buy * buy_bias > combined_sell:
                     if self._validate_entry(direction="BUY", confidence=confidence,
@@ -447,6 +449,22 @@ class DecisionEngine:
                                 f"({elapsed:.0f}/{cooldown_min}min)"
                             )
 
+                # Cek same-direction cooldown: prevent duplicate entries dalam 60 detik
+                if not decision["no_trade"] and self._last_trade_direction == new_dir:
+                    same_dir_cooldown_sec = 60
+                    if self._last_trade_time is not None:
+                        elapsed = (datetime.now() - self._last_trade_time).total_seconds()
+                        if elapsed < same_dir_cooldown_sec:
+                            decision["action"] = TradeDirection.HOLD.value
+                            decision["no_trade"] = True
+                            decision["no_trade_reasons"].append(
+                                f"Same-direction cooldown: {self._last_trade_direction} was "
+                                f"{elapsed:.0f}s ago (cooldown={same_dir_cooldown_sec}s)"
+                            )
+                            decision["reasons"].append(
+                                f"Same-direction cooldown: {elapsed:.0f}s < {same_dir_cooldown_sec}s"
+                            )
+
             # ── Reversal WARNING: reduce confidence ──
             if reversal_info and reversal_info.get("severity") == TrendReversalDetector.WARNING and not decision["no_trade"]:
                 decision["confidence"] *= 0.7
@@ -467,8 +485,7 @@ class DecisionEngine:
             self._last_trade_direction = decision["action"]
             # Note: time updated when trade actually opens, not just decision
             # Set here for approximate tracking
-            if self._last_trade_time is None:
-                self._last_trade_time = datetime.now()
+            self._last_trade_time = datetime.now()
 
         self._last_decision = decision
         return decision

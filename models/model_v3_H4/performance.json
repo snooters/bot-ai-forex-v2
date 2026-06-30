@@ -1,0 +1,43 @@
+{
+  "oos": {
+    "success": true,
+    "train_samples": 894,
+    "val_accuracy": 0.7714285714285715,
+    "total_trades": 237,
+    "winning_trades": 98,
+    "losing_trades": 139,
+    "win_rate": 41.35,
+    "accuracy": 64.23,
+    "non_hold_accuracy": 41.35,
+    "directional_predictions": 238,
+    "hold_predictions": 8,
+    "profit_factor": 1.3027,
+    "sharpe_ratio": 1.9794,
+    "max_drawdown_pct": -0.56,
+    "net_profit": 98.26,
+    "avg_win": 4.32,
+    "avg_loss": -2.34,
+    "avg_win_loss_ratio": 1.85,
+    "oos_samples": 246,
+    "timeframe": "H4",
+    "split": {
+      "train": 894,
+      "val": 245,
+      "test": 246
+    },
+    "validated_at": "2026-06-22T11:46:59.151975",
+    "passed": true,
+    "grade": "C"
+  },
+  "oos_score": 47.135,
+  "accuracy": {
+    "xgboost": 0.8922910662824207,
+    "xgboost_val": 0.5482014388489208,
+    "random_forest": 0.6213976945244957,
+    "random_forest_val": 0.47050359712230216,
+    "lightgbm": 0.8822046109510087,
+    "lightgbm_val": 0.5338129496402878,
+    "lstm": 0.478704040771751,
+    "lstm_val": 0.506006006006006
+  }
+}

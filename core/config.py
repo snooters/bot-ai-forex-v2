@@ -48,7 +48,7 @@ class Config:
                 "min_rr": self._get_float("MIN_RR", 1.33),
                 "min_profit_pips_exit": self._get_float("MIN_PROFIT_PIPS_EXIT", 15.0),
                 "min_profit_atr_exit": self._get_float("MIN_PROFIT_ATR_EXIT", 1.0),
-                "secure_close_threshold": self._get_int("SECURE_CLOSE_THRESHOLD", 85),
+                "secure_close_threshold": self._get_int("SECURE_CLOSE_THRESHOLD", 80),
                 "min_hold_minutes": self._get_int("MIN_HOLD_MINUTES", 15),
             },
             "risk": {
@@ -74,7 +74,7 @@ class Config:
                 "allow_no_trade": self._get_bool("ALLOW_NO_TRADE", True),
                 "max_spread_pips": self._get_float("MAX_SPREAD_PIPS", 2.0),
                 "counter_trade_min_confidence": self._get_float("COUNTER_TRADE_MIN_CONFIDENCE", 0.60),
-                "buy_bias_correction": self._get_float("BUY_BIAS_CORRECTION", 1.2),
+                "buy_bias_correction": self._get_float("BUY_BIAS_CORRECTION", 1.0),
             },
             "learning": {
                 "enabled": self._get_bool("ENABLE_SELF_LEARNING", True),
@@ -349,11 +349,15 @@ class Config:
         return 0.30
 
     def get_dynamic_max_positions(self, balance: float) -> int:
-        if balance < 500:
+        if balance < 1500:
             return 1
-        elif balance < 2000:
+        elif balance < 6000:
             return 2
-        return 3
+        elif balance < 10000:
+            return 3
+        elif balance < 15000:
+            return 4
+        return 5
 
     def to_dict(self) -> dict:
         return self._config

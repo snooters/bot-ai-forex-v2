@@ -164,6 +164,18 @@ class AutoRetrainEngine:
 
             self.drift_detector.reset_baseline()
 
+            # ── Save feature importance for next retrain ──
+            try:
+                self.model_trainer.save_feature_importance(
+                    self.model_trainer.get_ensemble(),
+                    features,
+                    pair or "UNKNOWN",
+                    timeframe or 5,
+                    model_version,
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to save feature importance: {e}")
+
             result = {
                 "success": True,
                 "version": model_version,

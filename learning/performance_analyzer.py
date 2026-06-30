@@ -77,7 +77,7 @@ class PerformanceAnalyzer:
 
         by_tf: Dict[str, List[Dict]] = {}
         for t in closed:
-            tf = t.get("timeframe", "M15")
+            tf = t.get("timeframe", "M5")
             by_tf.setdefault(tf, []).append(t)
 
         for tf_name, tf_trades in by_tf.items():

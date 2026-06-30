@@ -20,5 +20,8 @@
     "atr",
     "spread",
     "body_wick_ratio"
-  ]
+  ],
+  "version": "ensemble_v2_m5_v1",
+  "type": "ensemble_v2",
+  "source": "auto_train"
 }

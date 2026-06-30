@@ -9,6 +9,10 @@ from core.constants import HISTORICAL_DIR, CACHE_DIR
 from utils.logger import get_logger
 
 
+# Broker suffixes to strip from symbol names for storage directory
+_STORAGE_SUFFIXES = (".fl", ".raw", ".ecn", ".pro", ".m", ".fx", ".i", ".MBE")
+
+
 class ParquetStorage:
     def __init__(self):
         self.logger = get_logger("data_storage")
@@ -27,8 +31,19 @@ class ParquetStorage:
             self._parquet_available = False
             self.logger.info("pyarrow not installed, using CSV fallback")
 
+    @staticmethod
+    def _clean_symbol(symbol: str) -> str:
+        """Strip broker suffixes so all data for a pair lands in one directory."""
+        name = symbol
+        for suffix in _STORAGE_SUFFIXES:
+            if name.lower().endswith(suffix):
+                name = name[:-len(suffix)]
+                break
+        return name
+
     def _get_path(self, symbol: str, timeframe: int, ext: str = "parquet") -> Path:
-        pair_dir = self._base_dir / symbol
+        clean = self._clean_symbol(symbol)
+        pair_dir = self._base_dir / clean
         pair_dir.mkdir(exist_ok=True)
         return pair_dir / f"tf_{timeframe}.{ext}"
 

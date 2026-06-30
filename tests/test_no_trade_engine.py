@@ -78,7 +78,7 @@ class TestNoTradeEngine:
         sev = self.engine.should_no_trade(
             confidence=0.75, market_score=70, spread=1,
             existing_positions=[{"ticket": 1}, {"ticket": 2}, {"ticket": 3}],
-            balance=10000,
+            balance=8000,
         )
         assert sev == NoTradeEngine.CRITICAL
         assert any("Max positions" in r for r in self.engine.reasons)

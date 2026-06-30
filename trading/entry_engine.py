@@ -1,7 +1,7 @@
 from typing import Dict, Optional
 
 from core.config import config
-from core.constants import TradeDirection
+from core.constants import TradeDirection, Timeframe
 from risk.risk_manager import RiskManager
 from trading.execution_engine import ExecutionEngine
 from data.market_data_engine import MarketDataEngine
@@ -138,9 +138,10 @@ class EntryEngine:
                 result["lot_size"] = lot_size
                 result["risk"] = trade_eval
                 result["decision"] = decision
-                result["timeframe"] = decision.get("timeframe", "M15")
+                result["timeframe"] = self._get_tf_label(decision)
                 result["use_scale_out"] = True
                 result["tickets"] = [r.get("ticket") for r in results]
+                result["model_version"] = decision.get("model_version", "unknown")
                 return result
 
         # Single order mode
@@ -167,11 +168,19 @@ class EntryEngine:
             result["lot_size"] = lot_size
             result["risk"] = trade_eval
             result["decision"] = decision
-            result["timeframe"] = decision.get("timeframe", "M15")
+            result["timeframe"] = self._get_tf_label(decision)
             result["use_scale_out"] = False
+            result["model_version"] = decision.get("model_version", "unknown")
             return result
 
         return None
+
+    def _get_tf_label(self, decision: Dict) -> str:
+        """Convert timeframe from decision dict to string label, handling int values."""
+        tf_raw = decision.get("timeframe", "M5")
+        if isinstance(tf_raw, int):
+            return Timeframe.LABELS.get(tf_raw, "M5")
+        return str(tf_raw) if tf_raw else "M5"
 
     def _calculate_sl_tp(
         self,

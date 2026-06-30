@@ -139,7 +139,7 @@ def safe_float_division(a: float, b: float, default: float = 0.0) -> float:
 
 SIM_TRADE_MAX_BARS = 72          # Max lookahead candles (12h at M5)
 SIM_TRADE_VOLUME = 0.01          # Standard mini lot
-SIM_TRADE_SL_ATR = 1.0           # SL = 1 × ATR
+SIM_TRADE_SL_ATR = 2.0           # SL = 2 × ATR (match live engine)
 SIM_TRADE_TP_ATR = 2.0           # TP1 = 2 × ATR
 SIM_TRADE_COMMISSION_RATE = 0.00006
 

@@ -22,6 +22,11 @@ class ExitEngine:
         # Track tickets with future timestamps to avoid log spam
         self._future_time_tickets: Dict[int, int] = {}  # ticket -> warning count
         self._future_time_close_threshold = 5  # force close after N warnings
+        self._future_time_close_attempts: Dict[int, int] = {}  # ticket -> close attempts
+        self._future_time_max_close_attempts = 10  # max force-close tries before giving up
+        # Clock drift correction: cache offset between MT5 server time and system clock
+        # Positive = system clock behind server (server time > system time)
+        self._clock_offset_seconds: float = 0.0
 
     MAX_SANE_ELAPSED_MINUTES = 7 * 24 * 60  # 7 days — anything beyond is unrealistic
 
@@ -49,40 +54,34 @@ class ExitEngine:
             now = datetime.now(timezone.utc)
             elapsed_sec = (now - open_time).total_seconds()
             
-            # Sanity check: if elapsed is unreasonably large (e.g. pos.time = 0 from broker)
-            # or negative (future timestamp), treat as invalid.
+            # Jika elapsed negatif: kemungkinan clock drift antara MT5 server dan lokal.
+            # Auto-detect offset dan cache untuk koreksi posisi selanjutnya.
+            # Log cuma 1x — jangan spam tiap detik.
+            tick_key = ticket if isinstance(ticket, int) else hash(str(ticket))
             if elapsed_sec < 0:
-                # Track warning count per ticket to avoid log spam
-                tid = ticket if isinstance(ticket, int) else hash(str(ticket))
-                self._future_time_tickets[tid] = self._future_time_tickets.get(tid, 0) + 1
-                warn_count = self._future_time_tickets[tid]
-                
-                if warn_count == 1:
+                # Cache the clock offset (server_ahead = positive)
+                if self._clock_offset_seconds == 0.0:
+                    self._clock_offset_seconds = -elapsed_sec  # positive = server ahead
                     self.logger.warning(
-                        f"Position {ticket} has FUTURE time: "
-                        f"open_time={open_time} (elapsed={elapsed_sec:.0f}s) — "
-                        f"treating as invalid. Will auto-close after "
-                        f"{self._future_time_close_threshold} warnings."
+                        f"Position {ticket} has future/open time: "
+                        f"open_time={open_time} now={now} (delta={elapsed_sec:.0f}s) — "
+                        f"CLOCK DRIFT DETECTED: system clock is "
+                        f"{self._clock_offset_seconds/3600:.2f}h behind MT5 server. "
+                        f"Auto-correcting for subsequent checks."
                     )
-                elif warn_count < self._future_time_close_threshold:
-                    self.logger.debug(
-                        f"Position {ticket} still has FUTURE time "
-                        f"(warning #{warn_count}) — skipping"
-                    )
-                else:
-                    # Force close this position — it has an invalid timestamp
+                # Recalculate with clock offset correction
+                adjusted_elapsed = elapsed_sec + self._clock_offset_seconds
+                if adjusted_elapsed >= 0:
+                    self._future_time_tickets.pop(tick_key, None)
+                    return adjusted_elapsed / 60.0
+                # If still negative after correction, skip
+                if tick_key not in self._future_time_tickets:
+                    self._future_time_tickets[tick_key] = 0
                     self.logger.warning(
-                        f"Position {ticket} has had FUTURE time for "
-                        f"{warn_count} checks — force closing!"
+                        f"Position {ticket} still has future time after clock correction: "
+                        f"open_time={open_time} now={now} (delta={elapsed_sec:.0f}s) — "
+                        f"skipping age check."
                     )
-                    try:
-                        close_result = self.execution_engine.close_position(position)
-                        if close_result:
-                            self.logger.info(f"Force closed FUTURE-time position {ticket}")
-                        else:
-                            self.logger.error(f"Failed to force close position {ticket}")
-                    except Exception as e:
-                        self.logger.error(f"Error force closing position {ticket}: {e}")
                 return None
             
             if elapsed_sec > self.MAX_SANE_ELAPSED_MINUTES * 60:
@@ -197,12 +196,30 @@ class ExitEngine:
                         f"— confidence={confidence:.0%} but skipping close (time field missing)"
                     )
 
-        # ── Break of structure: close ──
+        # ── Break of structure: close (with min hold & min profit) ──
+        # NOTE: BOS tanpa min hold = posisi diclose dalam hitungan detik/menit
+        # sebelum price action sempat develop. Ini menyebabkan profit 0.5-0.6 pips
+        # padahal TP di 13-16 pips. Fix: tambah min hold 15m + min profit 4 pips.
         if market_structure:
             if market_structure.get("has_bos"):
                 if action != PositionAction.FULL_CLOSE:
-                    action = PositionAction.FULL_CLOSE
-                    reasons.append("Break of structure detected")
+                    elapsed_min = self._get_elapsed_minutes(position)
+                    min_hold = config.trading.get("min_hold_minutes", 15)
+                    min_profit_pips = config.trading.get("min_profit_pips_exit", 8)
+                    if elapsed_min is not None and elapsed_min >= min_hold:
+                        if profit_pips >= min_profit_pips:
+                            action = PositionAction.FULL_CLOSE
+                            reasons.append(f"Break of structure detected (hold={elapsed_min:.0f}m, profit={profit_pips:.0f}pips)")
+                        else:
+                            self.logger.debug(
+                                f"BOS detected but profit too low ({profit_pips:.1f}pips < {min_profit_pips}pips) "
+                                f"— holding ticket {position.get('ticket','?')}"
+                            )
+                    elif elapsed_min is not None:
+                        self.logger.debug(
+                            f"BOS detected but too early ({elapsed_min:.0f}m < {min_hold}m min_hold) "
+                            f"— holding ticket {position.get('ticket','?')}"
+                        )
 
         # ── News-driven: close (only after min hold time) ──
         if regime_result.get("regime") == "NEWS_DRIVEN":
@@ -420,6 +437,18 @@ class ExitEngine:
 
         # ── 11. Reversal probability estimate ──
         reversal_prob = min(100, trend_against * 15 + (20 if momentum_weakening else 0) + (15 if rsi_extreme else 0) + (10 if confidence < 0.5 else 0))
+
+        # ── 11b. Price confirmation: filter jebakan trend ──
+        # Real reversal needs price to actually retrace, not just indicator alignment.
+        # Conditions (all must be true):
+        #   1. atr_multiple > 0.2 — price has moved away from entry (meaningful distance)
+        #   2. atr_multiple < 1.0 — price has retraced close to entry (profit shrinking)
+        #   3. momentum_weakening — momentum confirms the reversal
+        # NOTE: profit_sufficient is NOT used here because it measures the SAME thing
+        # as atr_multiple (distance from entry), causing logical conflict.
+        if atr > 0 and momentum_weakening and atr_multiple > 0.2 and atr_multiple < 1.0:
+            reversal_prob = min(100, reversal_prob + 20)
+
         tp_reach_prob = max(0, 100 - reversal_prob - close_score * 0.3)
 
         # ── 12. Decision ──

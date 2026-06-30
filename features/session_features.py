@@ -1,8 +1,36 @@
 import numpy as np
 import pandas as pd
-from typing import Dict
+from typing import Dict, Optional
+from datetime import datetime
 
 from utils.logger import get_logger
+
+# ── Session hour ranges ──
+# ASIA:    00:00 – 06:59  UTC (Tokyo/Sydney)
+# LONDON:  07:00 – 11:59  UTC
+# OVERLAP: 12:00 – 14:59  UTC (London + NY)
+# NY:      15:00 – 19:59  UTC (NY close)
+# OTHER:   20:00 – 23:59  UTC
+
+
+def detect_session(dt: Optional[datetime]) -> str:
+    """Return session label for a single datetime."""
+    if dt is None:
+        return "UNKNOWN"
+    hour = dt.hour
+    minute = dt.minute
+    if hour >= 0 and hour < 7:
+        return "ASIA"
+    if (hour >= 7 and hour < 12) or (hour == 7 and minute >= 0):
+        # LONDON unless in overlap
+        if hour >= 12 and hour < 15:
+            return "OVERLAP"
+        return "LONDON"
+    if (hour >= 12 and hour < 20) or (hour == 12 and minute >= 0):
+        if hour < 15:
+            return "OVERLAP"
+        return "NEW_YORK"
+    return "OTHER"
 
 
 class SessionFeatureEngine:

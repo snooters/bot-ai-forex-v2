@@ -69,33 +69,115 @@ class MLPredictor:
         latest = X[-1:, :]
         return latest
 
+    def _select_features_by_importance(
+        self, ensemble: VotingEnsemble, all_features: List[str], expected: int
+    ) -> Optional[List[str]]:
+        """Coba select features berdasarkan feature importance dari model version.
+        Prioritaskan fitur dengan importance tertinggi dari training history.
+        """
+        version = getattr(ensemble, "version", "")
+        if not version:
+            return None
+
+        # Coba load feature importance dari performance.json
+        try:
+            from learning.model_manager import ModelManager
+            mm = ModelManager()
+            perf = mm._load_performance(version)
+            if perf and "feature_importance" in perf:
+                fi = perf["feature_importance"]
+                sorted_features = sorted(fi.keys(), key=lambda k: fi[k], reverse=True)
+                selected = [f for f in sorted_features if f in all_features][:expected]
+                if len(selected) == expected:
+                    return selected
+        except Exception as e:
+            self.logger.debug(f"Feature importance lookup failed: {e}")
+
+        # Alternative: cek apakah ada feature_importance.csv di model dir
+        try:
+            import glob
+            for fi_file in glob.glob(f"models/feature_importance/*{version}*.csv") + \
+                           glob.glob(f"models/**/*{version}*feature_importance*.csv"):
+                import pandas as pd
+                df_fi = pd.read_csv(fi_file)
+                feat_col = [c for c in ["feature", "Feature", "name"] if c in df_fi.columns]
+                imp_col = [c for c in ["importance", "Importance", "value"] if c in df_fi.columns]
+                if feat_col and imp_col:
+                    df_fi = df_fi.sort_values(imp_col[0], ascending=False)
+                    selected = [f for f in df_fi[feat_col[0]].tolist() if f in all_features][:expected]
+                    if len(selected) == expected:
+                        self.logger.info(f"Resolved {expected} features from {fi_file}")
+                        return selected
+        except Exception as e:
+            self.logger.debug(f"Feature importance CSV lookup failed: {e}")
+
+        return None
+
     def _resolve_feature_cols(self, ensemble: VotingEnsemble) -> Optional[List[str]]:
         """Resolve feature_cols yang benar untuk ensemble.
         Handle mismatch: jika feature_cols di metadata tidak sesuai
-        dengan jumlah fitur yang diharapkan model, gunakan full set.
+        dengan jumlah fitur yang diharapkan model, gunakan heuristic.
+
+        Fallback strategy:
+        1. Jika feature_cols ada di metadata dan cocok → pakai itu
+        2. Jika feature_cols ada tapi jumlahnya beda → cari feature importance
+        3. Jika feature_cols None → deteksi n_features_in_ dari model, pilih top N
+        4. Jika gagal total → raise error jelas (jangan silent crash)
         """
         fcols = ensemble.feature_cols
-        if fcols is None:
-            return None
 
-        # Cek model pertama untuk jumlah fitur yang diharapkan
-        # Gunakan underlying model (model.model) bukan wrapper, karena wrapper
-        # (XGBoostModel/RandomForestModel/LightGBMModel) tidak memiliki n_features_in_
+        # Deteksi jumlah fitur yang diharapkan model dari model pertama yang punya n_features_in_
         expected = None
         for name, model in ensemble.models.items():
             underlying = getattr(model, 'model', model)
             if hasattr(underlying, 'n_features_in_') and underlying.n_features_in_:
-                expected = underlying.n_features_in_
+                expected = int(underlying.n_features_in_)
                 break
 
-        if expected is not None and expected != len(fcols):
-            self.logger.warning(
-                f"Feature count mismatch: model expects {expected}, "
-                f"feature_cols has {len(fcols)}. Using full feature set."
-            )
-            return None  # fallback ke full set
+        # ── Case 1: feature_cols tersedia dan cocok ──
+        if fcols is not None:
+            if expected is not None and expected == len(fcols):
+                return fcols
+            if expected is not None and expected != len(fcols):
+                self.logger.warning(
+                    f"Feature count mismatch: model expects {expected}, "
+                    f"feature_cols has {len(fcols)}. Attempting fallback..."
+                )
+                # fall through ke fallback logic
 
-        return fcols
+        # ── Fallback: feature_cols None atau mismatch ──
+        all_features = self.feature_pipeline.get_feature_columns()
+
+        if expected is not None and expected <= len(all_features):
+            # Coba cari feature importance dari model version
+            selected = self._select_features_by_importance(ensemble, all_features, expected)
+            if selected:
+                self.logger.info(
+                    f"Resolved {len(selected)} features for {getattr(ensemble, 'version', 'unknown')} "
+                    f"via feature importance (expected={expected})"
+                )
+                return selected
+
+            # Fallback: ambil expected features pertama (better than crash)
+            self.logger.warning(
+                f"No feature importance found for model version. "
+                f"Using first {expected} of {len(all_features)} features as fallback. "
+                f"Model: {getattr(ensemble, 'version', 'unknown')}"
+            )
+            return all_features[:expected]
+
+        # ── Gagal total ──
+        if expected is not None:
+            raise ModelPredictionError(
+                f"Cannot resolve features: model expects {expected} features "
+                f"but pipeline only provides {len(all_features)}. "
+                f"Model version: {getattr(ensemble, 'version', 'unknown')}"
+            )
+        raise ModelPredictionError(
+            f"Cannot determine expected feature count. "
+            f"feature_cols missing and model has no n_features_in_. "
+            f"Model version: {getattr(ensemble, 'version', 'unknown')}"
+        )
 
     @safe_execute(default_return=None, raise_on_error=True)
     def predict(self, df: pd.DataFrame, timeframe: int = Timeframe.M15) -> Dict:

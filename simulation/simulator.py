@@ -120,8 +120,8 @@ class Simulator:
         volume_fixed: Optional[float] = None,
         warmup_bars: int = 500,
         max_positions: int = 2,
-        atr_multiplier_tp1: float = 2.0,
-        atr_multiplier_tp2: float = 4.0,
+        atr_multiplier_tp1: float = 3.0,
+        atr_multiplier_tp2: float = 5.0,
         atr_multiplier_trailing: float = 1.5,
         max_hold_hours: float = 12.0,
         min_rr: float = 2.0,
@@ -310,14 +310,19 @@ class Simulator:
         volume = self.volume_fixed or 0.01
 
         atr_pts = atr
+        # Match live engine: SL = ATR × 2.0 (min 15 pips), TP1 = ATR × 3.0, TP2 = ATR × 5.0
+        pip_size = 0.0001
+        sl_pts = max(atr_pts * 2.0, 15 * pip_size)
+        tp1_pts = atr_pts * self.atr_multiplier_tp1
+        tp2_pts = atr_pts * self.atr_multiplier_tp2
         if side == "BUY":
-            sl_price = price - atr_pts * 1.0
-            tp1_price = price + atr_pts * self.atr_multiplier_tp1
-            tp2_price = price + atr_pts * self.atr_multiplier_tp2
+            sl_price = price - sl_pts
+            tp1_price = price + tp1_pts
+            tp2_price = price + tp2_pts
         else:
-            sl_price = price + atr_pts * 1.0
-            tp1_price = price - atr_pts * self.atr_multiplier_tp1
-            tp2_price = price - atr_pts * self.atr_multiplier_tp2
+            sl_price = price + sl_pts
+            tp1_price = price - tp1_pts
+            tp2_price = price - tp2_pts
 
         tp1_dist = abs(tp1_price - price)
         sl_dist = abs(price - sl_price)

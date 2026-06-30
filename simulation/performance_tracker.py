@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional
 
+from features.session_features import detect_session
+
 
 class PerformanceTracker:
     def compute(self, trades: List[Dict], initial_balance: float) -> Dict:
@@ -51,6 +53,7 @@ class PerformanceTracker:
         by_side = self._group_stats(trades, "side")
         by_exit_reason = self._group_stats(trades, "exit_reason")
         by_pair = self._group_stats(trades, "pair")
+        by_session = self._group_by_session(trades)
 
         return {
             "total_trades": total,
@@ -81,6 +84,7 @@ class PerformanceTracker:
             "by_side": by_side,
             "by_exit_reason": by_exit_reason,
             "by_pair": by_pair,
+            "by_session": by_session,
             "return_pct": round(net_profit / initial_balance * 100, 4) if initial_balance > 0 else 0.0,
         }
 
@@ -96,7 +100,7 @@ class PerformanceTracker:
             "consecutive_wins": 0, "consecutive_losses": 0,
             "best_trade": {}, "worst_trade": {},
             "by_regime": {}, "by_confidence": {}, "by_hour": {}, "by_side": {},
-            "by_exit_reason": {}, "by_pair": {}, "return_pct": 0.0,
+            "by_exit_reason": {}, "by_pair": {}, "by_session": {}, "return_pct": 0.0,
         }
 
     def _compute_sharpe(self, pnls: List[float]) -> float:
@@ -194,6 +198,29 @@ class PerformanceTracker:
             buckets[label].append(t)
         result = {}
         for k, g in buckets.items():
+            total = len(g)
+            wins = sum(1 for t in g if t.get("net_pnl", 0) > 0)
+            gross_p = sum(t["net_pnl"] for t in g if t.get("net_pnl", 0) > 0)
+            gross_l = abs(sum(t["net_pnl"] for t in g if t.get("net_pnl", 0) <= 0))
+            result[k] = {
+                "trades": total,
+                "wins": wins,
+                "win_rate": round(wins / total, 4) if total > 0 else 0,
+                "profit_factor": round(gross_p / gross_l, 4) if gross_l > 0 else (gross_p if gross_p > 0 else 0),
+                "net_pnl": round(gross_p - gross_l, 2),
+            }
+        return result
+
+    def _group_by_session(self, trades: List[Dict]) -> Dict:
+        groups: Dict[str, List[Dict]] = {}
+        for t in trades:
+            et = t.get("entry_time")
+            sess = detect_session(et) if et is not None else "UNKNOWN"
+            if sess not in groups:
+                groups[sess] = []
+            groups[sess].append(t)
+        result = {}
+        for k, g in groups.items():
             total = len(g)
             wins = sum(1 for t in g if t.get("net_pnl", 0) > 0)
             gross_p = sum(t["net_pnl"] for t in g if t.get("net_pnl", 0) > 0)

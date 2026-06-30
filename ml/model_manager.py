@@ -283,6 +283,13 @@ class ModelManager:
                 with open(meta_path) as f:
                     meta = json.load(f)
                 ensemble.feature_cols = meta.get("feature_cols")
+                # Set version from metadata — critical for model_version tracking
+                # Supports: "version" (direct), "source_version", or derived from directory name
+                version = meta.get("version") or meta.get("source_version") or ""
+                if not version:
+                    # Fallback: derive from directory name
+                    version = directory.name.replace("model_", "").replace("production_", "prod_")
+                ensemble.version = version
             except Exception:
                 pass
         model_class_map = {

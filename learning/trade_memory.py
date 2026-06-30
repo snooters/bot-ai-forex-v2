@@ -189,7 +189,7 @@ class TradeMemory:
 
         return self.record_trade(
             pair=trade.get("symbol", "UNKNOWN"),
-            timeframe=trade.get("timeframe", "M15"),
+            timeframe=trade.get("timeframe", "M5"),
             direction=direction,
             entry_price=entry_price,
             exit_price=exit_price,

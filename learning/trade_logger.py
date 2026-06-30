@@ -48,7 +48,7 @@ class TradeLogger:
             "confidence": trade.get("decision", {}).get("confidence", 0),
             "market_score": trade.get("decision", {}).get("market_score", 0),
             "model_version": trade.get("model_version", "unknown"),
-            "timeframe": trade.get("timeframe", "M15"),
+            "timeframe": trade.get("timeframe", "M5"),
             "market_conditions": {
                 "trend": trade.get("decision", {}).get("trend", ""),
                 "regime": trade.get("decision", {}).get("regime", ""),
@@ -212,6 +212,9 @@ class TradeLogger:
             entry_price = entry_deal.get("price", 0)
             volume = entry_deal.get("volume", 0)
             symbol = entry_deal.get("symbol", "")
+            # Strip broker suffix for consistency (EURUSD.fl → EURUSD)
+            if "." in symbol:
+                symbol = symbol.split(".")[0]
             entry_ts = entry_deal.get("time", 0)
             profit = 0.0
             exit_price = entry_price
@@ -234,7 +237,7 @@ class TradeLogger:
             db_conf = 0
             db_market_score = 0
             db_market_conditions = {}
-            db_timeframe = "M15"
+            db_timeframe = "M5"
             db_model_version = "unknown"
             try:
                 db_path = self._trade_dir / "trade_memory.db"
@@ -256,7 +259,7 @@ class TradeLogger:
                                 db_market_conditions = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
                             except:
                                 db_market_conditions = {}
-                        db_timeframe = row[2] or "M15"
+                        db_timeframe = row[2] or "M5"
                         db_model_version = row[3] or "unknown"
                     conn.close()
             except Exception:

@@ -133,7 +133,7 @@ class ForexBot:
         self._tiktok_mode = False
         self.tiktok_dashboard = TikTokDashboard()
         self._last_tiktok_display = datetime.now()
-        self._symbols = config.trading["pairs"]
+        self._symbols = config.trading["pairs"]  # will be refreshed after MT5 connect (to resolve .fl suffix etc)
         self._timeframes = [self._tf_to_minutes(tf) for tf in config.trading["timeframes"]]
 
         self._last_analysis: Dict = {}
@@ -141,6 +141,7 @@ class ForexBot:
         self._last_heartbeat_time = 0.0
         self._last_emergency_check: Dict = {}
         self._equity_history: List[float] = []  # for web dashboard equity sparkline
+        self._last_opened_trade: Dict[str, datetime] = {}  # symbol → waktu trade terakhir dibuka (cegah duplicate entries)
 
 
     def _tf_to_minutes(self, tf: str) -> int:
@@ -170,6 +171,10 @@ class ForexBot:
 
         self.logger.info("Initializing Market Data Engine...")
         self.data_engine.initialize()
+
+        # Refresh symbol list after MT5 resolves suffixes (EURUSD → EURUSD.fl etc.)
+        self._symbols = list(config.trading["pairs"])
+        self.logger.info(f"Resolved symbols: {self._symbols}")
 
         account_info = self.data_engine.get_account_info()
         if account_info and account_info.get("login"):
@@ -368,9 +373,14 @@ class ForexBot:
                 "balance": self._account_info.get("balance", 0),
             })
 
+        # Attempt initial price fetch for dashboard
+        init_tick = self.data_engine.get_current_price(self._symbols[0]) if self._symbols else None
+        init_price = init_tick.get("bid", 0) if init_tick else 0
+
         self.dashboard.update({
             "status": "initialized",
             "symbol": self._symbols[0] if self._symbols else "",
+            "current_price": init_price,
             "balance": self._account_info.get("balance", 0),
             "equity": self._account_info.get("equity", 0),
             "margin": self._account_info.get("margin", 0),
@@ -625,6 +635,7 @@ class ForexBot:
                     decision["stop_loss"] = price - atr_val * 1.5 if decision["action"] == "BUY" else price + atr_val * 1.5
                     decision["take_profit"] = price + atr_val * 2.5 if decision["action"] == "BUY" else price - atr_val * 2.5
                     decision["entry_price"] = price
+                    decision["timeframe"] = "M5"
             else:
                 decision = self.decision_engine.make_decision(
                 symbol=symbol,
@@ -657,9 +668,10 @@ class ForexBot:
                 "feature_summary": feature_summary,
                 "sr": sr,
                 "multi_tf_trends": multi_tf_trends,
+                "price": price,
             }
 
-            ml_sig = decision.get("ml_signal", {})
+            ml_sig = decision.get("ml_signal", {}) or {}
             if use_ensemble:
                 details = decision.get("details", {})
                 self.logger.info(
@@ -694,28 +706,43 @@ class ForexBot:
             else:
                 if not decision["no_trade"] and is_trade_action:
                     if not positions:
-                        atr = (df_aligned_feat["atr"].iloc[-1] if "atr" in df_aligned_feat.columns
-                               and not df_aligned_feat["atr"].empty else 0.001)
+                        # In-memory duplicate entry guard: cegah same-direction trade dalam 60 detik
+                        now = datetime.now()
+                        last_trade_time = self._last_opened_trade.get(symbol)
+                        _skip_duplicate = False
+                        if last_trade_time is not None:
+                            elapsed_sec = (now - last_trade_time).total_seconds()
+                            if elapsed_sec < 60:
+                                self.logger.warning(
+                                    f"BLOCKED duplicate entry {symbol}: trade opened "
+                                    f"{elapsed_sec:.0f}s ago (cooldown=60s)"
+                                )
+                                _skip_duplicate = True
 
-                        trade_result = self.entry_engine.open_trade(
-                            symbol=symbol,
-                            decision=decision,
-                            account_info=self._account_info,
-                            df_entry=df_aligned_feat,
-                            atr=atr,
-                            current_price=price,
-                            existing_positions=positions,
-                        )
+                        if not _skip_duplicate:
+                            atr = (df_aligned_feat["atr"].iloc[-1] if "atr" in df_aligned_feat.columns
+                                   and not df_aligned_feat["atr"].empty else 0.001)
 
-                        if trade_result:
-                            entry_indicators = self._extract_indicators_from_df(df_aligned_feat)
-                            self.trade_logger.log_trade_open(trade_result, indicators=entry_indicators)
-                            sound_utils.entry()
-                            await self.telegram.send_event(TelegramEvent.OPEN_POSITION, {
-                                **trade_result,
-                                "confidence": decision.get("confidence", 0),
-                                "balance": self._account_info.get("balance", 0),
-                            })
+                            trade_result = self.entry_engine.open_trade(
+                                symbol=symbol,
+                                decision=decision,
+                                account_info=self._account_info,
+                                df_entry=df_aligned_feat,
+                                atr=atr,
+                                current_price=price,
+                                existing_positions=positions,
+                            )
+
+                            if trade_result:
+                                self._last_opened_trade[symbol] = datetime.now()
+                                entry_indicators = self._extract_indicators_from_df(df_aligned_feat)
+                                self.trade_logger.log_trade_open(trade_result, indicators=entry_indicators)
+                                sound_utils.entry()
+                                await self.telegram.send_event(TelegramEvent.OPEN_POSITION, {
+                                    **trade_result,
+                                    "confidence": decision.get("confidence", 0),
+                                    "balance": self._account_info.get("balance", 0),
+                                })
 
             if not config.account.get("learn_only") and positions:
                 atr_val = float(df_aligned_feat["atr"].iloc[-1]) if "atr" in df_aligned_feat.columns and not df_aligned_feat["atr"].empty else 0.001
@@ -1746,6 +1773,9 @@ class ForexBot:
             tick = self.data_engine.get_current_price(symbol)
             if tick:
                 state["current_price"] = tick.get("bid", 0)
+            else:
+                # Fallback ke stored price dari _process_symbol (line 582-583)
+                state["current_price"] = analysis.get("price", 0)
 
         state["last_signals"] = [
             {
@@ -2259,6 +2289,27 @@ async def cmd_simulate(bot: ForexBot, args: argparse.Namespace):
         for s, d in by_side.items():
             wr = d["wins"] / d["total"] * 100 if d["total"] > 0 else 0
             print(f"  {s}: {d['total']} trades, WR={wr:.1f}%")
+
+        # ── Performance by trading session (NY data collection) ──
+        from features.session_features import detect_session
+        by_session = {}
+        for t in trades:
+            et = t.get("entry_time")
+            if et is None:
+                continue
+            sess = detect_session(et)
+            by_session.setdefault(sess, {"total": 0, "wins": 0, "net_pnl": 0.0})
+            by_session[sess]["total"] += 1
+            if t.get("net_pnl", 0) > 0:
+                by_session[sess]["wins"] += 1
+            by_session[sess]["net_pnl"] += t.get("net_pnl", 0)
+        if by_session:
+            print("\n  Performance by Session:")
+            for sess in ["ASIA", "LONDON", "OVERLAP", "NEW_YORK", "OTHER"]:
+                d = by_session.get(sess)
+                if d and d["total"] > 0:
+                    wr = d["wins"] / d["total"] * 100
+                    print(f"    {sess:10s}: {d['total']:4d} trades, WR={wr:5.1f}%, PnL=${d['net_pnl']:+.2f}")
 
     sim_trades = result.get("trades", [])
     sim_trades_with_feat = sum(1 for t in sim_trades if t.get("feature_vector"))
